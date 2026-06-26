@@ -1,7 +1,7 @@
 # DATA-1 — Клиент загрузки OHLCV (Binance futures)
 
 - **Эпик:** E1 — Data Core
-- **Статус:** todo
+- **Статус:** done
 - **Зависимости:** INF-1
 
 ## Описание

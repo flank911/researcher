@@ -38,17 +38,17 @@
 ### E1 — Data Core
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
-| [DATA-1](DATA-1.md) | Клиент загрузки OHLCV (Binance futures) | todo | INF-1 |
+| [DATA-1](DATA-1.md) | Клиент загрузки OHLCV (Binance futures) | done | INF-1 |
 | [DATA-2](DATA-2.md) | Parquet store (партиционирование) | todo | DATA-1 |
 | [DATA-3](DATA-3.md) | Валидация данных | todo | DATA-2 |
 | [DATA-4](DATA-4.md) | Каталог датасетов + dataset_hash | todo | DATA-2, INF-3 |
 | [DATA-5](DATA-5.md) | DuckDB/Polars слой доступа (+warmup) | todo | DATA-2 |
-| [DATA-6](DATA-6.md) | Генератор TimeSlice | todo | INF-2 |
+| [DATA-6](DATA-6.md) | Генератор TimeSlice | done | INF-2 |
 
 ### E2 — Backtest Core
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
-| [BT-1](BT-1.md) | Strategy Protocol + MA Cross | todo | INF-2 |
+| [BT-1](BT-1.md) | Strategy Protocol + MA Cross | done | INF-2 |
 | [BT-2](BT-2.md) | Событийный движок: позиции/ордера | todo | BT-1 |
 | [BT-3](BT-3.md) | Fill timing / анти-look-ahead | todo | BT-2 |
 | [BT-4](BT-4.md) | Fees, slippage, sizing | todo | BT-2 |

@@ -1,7 +1,7 @@
 # BT-1 — Strategy Protocol + MA Cross
 
 - **Эпик:** E2 — Backtest Core
-- **Статус:** todo
+- **Статус:** done
 - **Зависимости:** INF-2
 
 ## Описание
