@@ -1,0 +1,50 @@
+schema_version: 1
+name: ma_cross_monthly_btc
+description: MVP — MA Cross stability by month on BTCUSDT 1h
+
+data:
+  exchange: binance
+  market: futures
+  symbols:
+    - BTCUSDT
+  timeframe: 1h
+  start: "2021-01-01"
+  end: "2025-12-31"
+
+time_slices:
+  type: month
+  min_bars: 300
+
+strategy:
+  name: ma_cross
+
+params_grid:
+  fast_ma: [10, 20, 50]
+  slow_ma: [100, 150, 200]
+
+execution:
+  initial_balance: 10000
+  commission_rate: 0.0006
+  slippage_pct: 0.0003
+  leverage: 3
+  position_size_type: percent_balance
+  position_size_value: 20
+  allow_short: true
+  close_on_reverse_signal: true
+  signal_lag: 1
+  fill_on: next_open
+
+metrics:
+  primary: stability_score
+  secondary:
+    - total_return_pct
+    - max_drawdown_pct
+    - sharpe
+    - profit_factor
+    - win_rate
+    - trades_count
+
+output:
+  save_trades: true
+  save_equity_curve: true
+  save_plots: false

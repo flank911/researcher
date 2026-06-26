@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Env / secrets
+.env
+
+# Data & results (generated, immutable raw kept out of git)
+data/raw/
+data/processed/
+data/features/
+data/results/
+*.parquet
+*.duckdb
+*.sqlite
+*.sqlite3
+*.db
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
