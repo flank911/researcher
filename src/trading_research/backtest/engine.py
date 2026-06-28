@@ -21,9 +21,12 @@ from datetime import datetime
 
 import polars as pl
 
+from trading_research.backtest.fees import FeeModel
 from trading_research.backtest.orders import OrderReason, Side
 from trading_research.backtest.portfolio import Portfolio, Trade
-from trading_research.domain import ExecutionModel, FillOn, PositionSizeType
+from trading_research.backtest.sizing import target_qty
+from trading_research.backtest.slippage import SlippageModel
+from trading_research.domain import ExecutionModel, FillOn
 from trading_research.strategies.base import LONG_SIGNAL, SHORT_SIGNAL
 
 REQUIRED_COLUMNS = ("open_time", "close", LONG_SIGNAL, SHORT_SIGNAL)
@@ -58,6 +61,8 @@ class BacktestEngine:
 
         wants = [self._desired_side(longs[i], shorts[i]) for i in range(n)]
         lag = execution.signal_lag
+        fee_model = FeeModel(execution.commission_rate)
+        slip_model = SlippageModel(execution.slippage_pct)
 
         portfolio = Portfolio(execution.initial_balance)
         equities: list[float] = []
@@ -67,13 +72,15 @@ class BacktestEngine:
             source = j - lag
             want = wants[source] if source >= 0 else None
             if want is not None:
-                fill_price = opens[j] if execution.fill_on is FillOn.NEXT_OPEN else closes[j]
-                self._apply_signal(portfolio, want, fill_price, times[j], execution)
+                raw_price = opens[j] if execution.fill_on is FillOn.NEXT_OPEN else closes[j]
+                self._apply_signal(
+                    portfolio, want, raw_price, times[j], execution, fee_model, slip_model
+                )
             equities.append(portfolio.equity(closes[j]))
 
         # Принудительно закрыть открытую позицию в конце данных.
         if portfolio.position is not None and n > 0:
-            portfolio.close(closes[-1], times[-1], OrderReason.FINAL)
+            self._close(portfolio, closes[-1], times[-1], OrderReason.FINAL, fee_model, slip_model)
             equities[-1] = portfolio.balance
 
         equity_curve = pl.DataFrame({"open_time": times, "equity": equities})
@@ -91,43 +98,56 @@ class BacktestEngine:
         self,
         portfolio: Portfolio,
         want: Side,
-        price: float,
+        raw_price: float,
         time: datetime,
         execution: ExecutionModel,
+        fee_model: FeeModel,
+        slip_model: SlippageModel,
     ) -> None:
         pos = portfolio.position
         if pos is None:
-            self._try_open(portfolio, want, price, time, execution)
+            self._try_open(portfolio, want, raw_price, time, execution, fee_model, slip_model)
             return
         if pos.side is want:
             return  # без пирамидинга
         if not execution.close_on_reverse_signal:
             return
-        portfolio.close(price, time, OrderReason.REVERSE)
-        self._try_open(portfolio, want, price, time, execution)
+        self._close(portfolio, raw_price, time, OrderReason.REVERSE, fee_model, slip_model)
+        self._try_open(portfolio, want, raw_price, time, execution, fee_model, slip_model)
 
+    @staticmethod
     def _try_open(
-        self,
         portfolio: Portfolio,
         side: Side,
-        price: float,
+        raw_price: float,
         time: datetime,
         execution: ExecutionModel,
+        fee_model: FeeModel,
+        slip_model: SlippageModel,
     ) -> None:
         if side is Side.SHORT and not execution.allow_short:
             return
-        qty = self._target_qty(execution, portfolio.balance, price)
+        # Открытие long — покупка, short — продажа.
+        eff_price = slip_model.fill_price(raw_price, is_buy=side is Side.LONG)
+        qty = target_qty(execution, portfolio.balance, eff_price)
         if qty <= 0:
             return
-        portfolio.open(side, qty, price, time)
+        fee = fee_model.fee(eff_price, qty)
+        portfolio.open(side, qty, eff_price, time, fee)
 
     @staticmethod
-    def _target_qty(execution: ExecutionModel, equity: float, price: float) -> float:
-        if equity <= 0 or price <= 0:
-            return 0.0
-        if execution.position_size_type is PositionSizeType.PERCENT_BALANCE:
-            notional = equity * (execution.position_size_value / 100.0) * execution.leverage
-            return notional / price
-        raise NotImplementedError(
-            f"position_size_type {execution.position_size_type!r} is implemented in BT-4"
-        )
+    def _close(
+        portfolio: Portfolio,
+        raw_price: float,
+        time: datetime,
+        reason: OrderReason,
+        fee_model: FeeModel,
+        slip_model: SlippageModel,
+    ) -> None:
+        pos = portfolio.position
+        if pos is None:
+            return
+        # Закрытие long — продажа, short — покупка.
+        eff_price = slip_model.fill_price(raw_price, is_buy=pos.side is Side.SHORT)
+        fee = fee_model.fee(eff_price, pos.qty)
+        portfolio.close(eff_price, time, reason, fee)

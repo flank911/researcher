@@ -43,20 +43,27 @@ class Portfolio:
             return self.balance
         return self.balance + self.position.unrealized_pnl(price)
 
-    def open(self, side: Side, qty: float, price: float, time: datetime) -> None:
+    def open(
+        self, side: Side, qty: float, price: float, time: datetime, fee: float = 0.0
+    ) -> None:
         if self.position is not None:
             raise RuntimeError("cannot open: position already open")
         if qty <= 0:
             raise ValueError(f"qty must be > 0, got {qty}")
-        self.position = Position(side=side, qty=qty, entry_price=price, entry_time=time)
+        self.balance -= fee
+        self.position = Position(
+            side=side, qty=qty, entry_price=price, entry_time=time, entry_fee=fee
+        )
 
-    def close(self, price: float, time: datetime, reason: OrderReason) -> Trade:
+    def close(
+        self, price: float, time: datetime, reason: OrderReason, fee: float = 0.0
+    ) -> Trade:
         if self.position is None:
             raise RuntimeError("cannot close: no open position")
         pos = self.position
-        pnl = pos.unrealized_pnl(price)
+        pnl = pos.unrealized_pnl(price)  # gross, по эффективным ценам
         pnl_pct = (price / pos.entry_price - 1.0) * 100.0 * pos.side.sign
-        self.balance += pnl
+        self.balance += pnl - fee
         trade = Trade(
             entry_time=pos.entry_time,
             exit_time=time,
@@ -66,7 +73,7 @@ class Portfolio:
             qty=pos.qty,
             pnl=pnl,
             pnl_pct=pnl_pct,
-            fees=0.0,
+            fees=pos.entry_fee + fee,
             reason=reason,
         )
         self.trades.append(trade)
