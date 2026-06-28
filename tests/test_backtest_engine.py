@@ -9,11 +9,12 @@ import pytest
 
 from trading_research.backtest.engine import BacktestEngine
 from trading_research.backtest.orders import OrderReason, Side
-from trading_research.domain import ExecutionModel, PositionSizeType
+from trading_research.domain import ExecutionModel, FillOn, PositionSizeType
 from trading_research.strategies.base import LONG_SIGNAL, SHORT_SIGNAL
 
 
 def _exec(**overrides: object) -> ExecutionModel:
+    # BT-2 mechanics tested with immediate fill (close, no lag); fill timing — BT-3.
     base: dict[str, object] = {
         "initial_balance": 10_000.0,
         "commission_rate": 0.0,
@@ -23,6 +24,8 @@ def _exec(**overrides: object) -> ExecutionModel:
         "position_size_value": 100.0,
         "allow_short": True,
         "close_on_reverse_signal": True,
+        "signal_lag": 0,
+        "fill_on": FillOn.CURRENT_CLOSE,
     }
     base.update(overrides)
     return ExecutionModel(**base)  # type: ignore[arg-type]
