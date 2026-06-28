@@ -1,11 +1,14 @@
-"""BT-2 — событийный (bar-by-bar) бэктест-движок.
+"""BT-2/BT-3 — событийный (bar-by-bar) бэктест-движок.
 
-Потребляет DataFrame сигналов (выход стратегии: ``open_time``, ``close``,
-``long_signal``, ``short_signal``) и ``ExecutionModel``, возвращает сделки и
-кривую капитала.
+Потребляет DataFrame сигналов (выход стратегии: ``open_time``, ``open``,
+``close``, ``long_signal``, ``short_signal``) и ``ExecutionModel``, возвращает
+сделки и кривую капитала.
+
+Fill timing (BT-3): сигнал, рассчитанный по ``close`` бара ``i``, исполняется на
+баре ``i + signal_lag``. ``fill_on=NEXT_OPEN`` — по цене ``open`` бара исполнения
+(анти-look-ahead, дефолт); ``fill_on=CURRENT_CLOSE`` — по ``close`` (отладка).
 
 Границы тикета (что будет добавлено позже):
-- BT-3: исполнение по ``fill_on``/``signal_lag`` (сейчас фиксируем на close бара сигнала);
 - BT-4: комиссии, слиппедж и модели размера позиции (сейчас только percent_balance);
 - BT-5: маржа/ликвидация и intrabar TP/SL;
 - BT-7: расчёт метрик и drawdown поверх equity_curve.
@@ -20,7 +23,7 @@ import polars as pl
 
 from trading_research.backtest.orders import OrderReason, Side
 from trading_research.backtest.portfolio import Portfolio, Trade
-from trading_research.domain import ExecutionModel, PositionSizeType
+from trading_research.domain import ExecutionModel, FillOn, PositionSizeType
 from trading_research.strategies.base import LONG_SIGNAL, SHORT_SIGNAL
 
 REQUIRED_COLUMNS = ("open_time", "close", LONG_SIGNAL, SHORT_SIGNAL)
@@ -37,33 +40,40 @@ class BacktestEngine:
 
     def run(self, signals: pl.DataFrame, execution: ExecutionModel) -> BacktestResult:
         missing = [c for c in REQUIRED_COLUMNS if c not in signals.columns]
+        if execution.fill_on is FillOn.NEXT_OPEN and "open" not in signals.columns:
+            missing.append("open")
         if missing:
             raise ValueError(f"signals missing required columns: {missing}")
 
+        times: list[datetime] = signals["open_time"].to_list()
+        closes: list[float] = [float(x) for x in signals["close"].to_list()]
+        opens: list[float] = (
+            [float(x) for x in signals["open"].to_list()]
+            if "open" in signals.columns
+            else closes
+        )
+        longs: list[bool] = [bool(x) for x in signals[LONG_SIGNAL].to_list()]
+        shorts: list[bool] = [bool(x) for x in signals[SHORT_SIGNAL].to_list()]
+        n = len(times)
+
+        wants = [self._desired_side(longs[i], shorts[i]) for i in range(n)]
+        lag = execution.signal_lag
+
         portfolio = Portfolio(execution.initial_balance)
-        times: list[datetime] = []
         equities: list[float] = []
 
-        last_time: datetime | None = None
-        last_price: float | None = None
-
-        for row in signals.iter_rows(named=True):
-            time: datetime = row["open_time"]
-            price = float(row["close"])
-            long_sig = bool(row[LONG_SIGNAL])
-            short_sig = bool(row[SHORT_SIGNAL])
-
-            want = self._desired_side(long_sig, short_sig)
+        for j in range(n):
+            # Исполнение сигнала, поданного lag баров назад, на текущем баре.
+            source = j - lag
+            want = wants[source] if source >= 0 else None
             if want is not None:
-                self._apply_signal(portfolio, want, price, time, execution)
-
-            times.append(time)
-            equities.append(portfolio.equity(price))
-            last_time, last_price = time, price
+                fill_price = opens[j] if execution.fill_on is FillOn.NEXT_OPEN else closes[j]
+                self._apply_signal(portfolio, want, fill_price, times[j], execution)
+            equities.append(portfolio.equity(closes[j]))
 
         # Принудительно закрыть открытую позицию в конце данных.
-        if portfolio.position is not None and last_time is not None and last_price is not None:
-            portfolio.close(last_price, last_time, OrderReason.FINAL)
+        if portfolio.position is not None and n > 0:
+            portfolio.close(closes[-1], times[-1], OrderReason.FINAL)
             equities[-1] = portfolio.balance
 
         equity_curve = pl.DataFrame({"open_time": times, "equity": equities})
