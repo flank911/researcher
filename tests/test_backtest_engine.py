@@ -155,5 +155,5 @@ def test_missing_columns_raise() -> None:
 
 def test_unimplemented_sizing_raises() -> None:
     signals = _signals([(100.0, True, False), (110.0, False, False)])
-    with pytest.raises(NotImplementedError, match="BT-4"):
-        BacktestEngine().run(signals, _exec(position_size_type=PositionSizeType.FIXED))
+    with pytest.raises(NotImplementedError, match="risk_based"):
+        BacktestEngine().run(signals, _exec(position_size_type=PositionSizeType.RISK_BASED))

@@ -14,6 +14,7 @@ class Position:
     qty: float
     entry_price: float
     entry_time: datetime
+    entry_fee: float = 0.0
 
     @property
     def is_long(self) -> bool:
