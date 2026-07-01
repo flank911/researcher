@@ -53,7 +53,7 @@
 | [BT-2](BT-2.md) | Событийный движок: позиции/ордера | done | BT-1 |
 | [BT-3](BT-3.md) | Fill timing / анти-look-ahead | done | BT-2 |
 | [BT-4](BT-4.md) | Fees, slippage, sizing | done | BT-2 |
-| [BT-5](BT-5.md) | Risk: маржа/ликвидация, intrabar TP/SL | todo | BT-4 |
+| [BT-5](BT-5.md) | Risk: маржа/ликвидация, intrabar TP/SL | done | BT-4 |
 | [BT-6](BT-6.md) | Funding в PnL | todo | BT-4, DATA-2 |
 | [BT-7](BT-7.md) | MetricsCalculator | todo | BT-2 |
 | [BT-8](BT-8.md) | Golden test против внешнего движка | todo | BT-7 |

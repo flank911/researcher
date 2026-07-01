@@ -98,3 +98,10 @@ class ExecutionModel(FrozenModel):
     close_on_reverse_signal: bool = True
     signal_lag: int = Field(default=1, ge=0)
     fill_on: FillOn = FillOn.NEXT_OPEN
+    # BT-5 — риск-слой. Все доли выражены как относительная дистанция от цены
+    # входа (``0.02`` = 2%). ``None`` — риск-выход отключён.
+    stop_loss_pct: float | None = Field(default=None, gt=0)
+    take_profit_pct: float | None = Field(default=None, gt=0)
+    trailing_stop_pct: float | None = Field(default=None, gt=0)
+    # Ставка поддерживающей маржи для модели ликвидации (доля нотионала).
+    maintenance_margin_rate: float = Field(default=0.005, ge=0, lt=1)
