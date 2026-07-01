@@ -153,7 +153,7 @@ def test_missing_columns_raise() -> None:
         BacktestEngine().run(bad, _exec())
 
 
-def test_unimplemented_sizing_raises() -> None:
+def test_risk_based_without_stop_loss_raises() -> None:
     signals = _signals([(100.0, True, False), (110.0, False, False)])
-    with pytest.raises(NotImplementedError, match="risk_based"):
+    with pytest.raises(ValueError, match="stop_loss_pct"):
         BacktestEngine().run(signals, _exec(position_size_type=PositionSizeType.RISK_BASED))

@@ -71,10 +71,32 @@ def test_sizing_applies_leverage() -> None:
     assert target_qty(pct, balance=10_000.0, price=100.0) == pytest.approx(300.0)
 
 
-def test_risk_based_not_implemented() -> None:
+def test_risk_based_requires_stop_loss() -> None:
     rb = _exec(position_size_type=PositionSizeType.RISK_BASED, position_size_value=1.0)
-    with pytest.raises(NotImplementedError, match="risk_based"):
+    with pytest.raises(ValueError, match="stop_loss_pct"):
         target_qty(rb, balance=10_000.0, price=100.0)
+
+
+def test_risk_based_sizes_to_risk_budget() -> None:
+    # риск 1% от 10_000 = 100; стоп 2% от 100 = 2 на единицу → qty = 100/2 = 50
+    rb = _exec(
+        position_size_type=PositionSizeType.RISK_BASED,
+        position_size_value=1.0,
+        stop_loss_pct=0.02,
+        leverage=10,  # экспозиция 50*100=5000 < 10*10000, кап не бьёт
+    )
+    assert target_qty(rb, balance=10_000.0, price=100.0) == pytest.approx(50.0)
+
+
+def test_risk_based_capped_by_leverage() -> None:
+    # риск 5% → qty = 500/(100*0.001)=... большой; кап: 1*10000/100 = 100 единиц
+    rb = _exec(
+        position_size_type=PositionSizeType.RISK_BASED,
+        position_size_value=5.0,
+        stop_loss_pct=0.001,
+        leverage=1,
+    )
+    assert target_qty(rb, balance=10_000.0, price=100.0) == pytest.approx(100.0)
 
 
 # --- integration: engine ----------------------------------------------------

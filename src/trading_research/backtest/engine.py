@@ -8,9 +8,14 @@ Fill timing (BT-3): сигнал, рассчитанный по ``close`` бар
 баре ``i + signal_lag``. ``fill_on=NEXT_OPEN`` — по цене ``open`` бара исполнения
 (анти-look-ahead, дефолт); ``fill_on=CURRENT_CLOSE`` — по ``close`` (отладка).
 
+Risk (BT-5): защитные выходы (TP/SL/trailing) и ликвидация срабатывают внутри бара
+по ``high``/``low`` — после исполнения сигнала на ``open`` и до отметки капитала на
+``close``. Пессимистичные допущения (порядок хуже→лучше, SL раньше TP, гэп сквозь
+уровень) описаны в ``backtest/risk.py``. Внутрибарная оценка требует колонок
+``high``/``low``; при заданных TP/SL/trailing их отсутствие — ошибка.
+
 Границы тикета (что будет добавлено позже):
-- BT-4: комиссии, слиппедж и модели размера позиции (сейчас только percent_balance);
-- BT-5: маржа/ликвидация и intrabar TP/SL;
+- BT-6: funding-платежи в PnL для futures;
 - BT-7: расчёт метрик и drawdown поверх equity_curve.
 """
 
@@ -24,6 +29,7 @@ import polars as pl
 from trading_research.backtest.fees import FeeModel
 from trading_research.backtest.orders import OrderReason, Side
 from trading_research.backtest.portfolio import Portfolio, Trade
+from trading_research.backtest.risk import RiskManager
 from trading_research.backtest.sizing import target_qty
 from trading_research.backtest.slippage import SlippageModel
 from trading_research.domain import ExecutionModel, FillOn
@@ -45,6 +51,12 @@ class BacktestEngine:
         missing = [c for c in REQUIRED_COLUMNS if c not in signals.columns]
         if execution.fill_on is FillOn.NEXT_OPEN and "open" not in signals.columns:
             missing.append("open")
+
+        risk = RiskManager(execution)
+        has_hl = "high" in signals.columns and "low" in signals.columns
+        if risk.enabled and not has_hl:
+            # Внутрибарные TP/SL/trailing невозможны без экстремумов бара.
+            missing.extend(c for c in ("high", "low") if c not in signals.columns)
         if missing:
             raise ValueError(f"signals missing required columns: {missing}")
 
@@ -54,6 +66,12 @@ class BacktestEngine:
             [float(x) for x in signals["open"].to_list()]
             if "open" in signals.columns
             else closes
+        )
+        highs: list[float] = (
+            [float(x) for x in signals["high"].to_list()] if has_hl else closes
+        )
+        lows: list[float] = (
+            [float(x) for x in signals["low"].to_list()] if has_hl else closes
         )
         longs: list[bool] = [bool(x) for x in signals[LONG_SIGNAL].to_list()]
         shorts: list[bool] = [bool(x) for x in signals[SHORT_SIGNAL].to_list()]
@@ -66,9 +84,11 @@ class BacktestEngine:
 
         portfolio = Portfolio(execution.initial_balance)
         equities: list[float] = []
+        tracked = portfolio.position  # для инициализации экстремума при новой позиции
+        extreme = 0.0
 
         for j in range(n):
-            # Исполнение сигнала, поданного lag баров назад, на текущем баре.
+            # 1) Исполнение сигнала (на open/close бара) — хронологически первым.
             source = j - lag
             want = wants[source] if source >= 0 else None
             if want is not None:
@@ -76,6 +96,29 @@ class BacktestEngine:
                 self._apply_signal(
                     portfolio, want, raw_price, times[j], execution, fee_model, slip_model
                 )
+
+            # Новая позиция → переинициализировать экстремум пути для trailing.
+            if portfolio.position is not tracked:
+                tracked = portfolio.position
+                if tracked is not None:
+                    extreme = risk.initial_extreme(tracked)
+
+            # 2) Внутрибарные защитные выходы и ликвидация (после open, до close).
+            if has_hl and portfolio.position is not None:
+                event, extreme = risk.evaluate(
+                    portfolio.position,
+                    portfolio.balance,
+                    extreme,
+                    high=highs[j],
+                    low=lows[j],
+                    bar_open=opens[j],
+                )
+                if event is not None:
+                    self._close(
+                        portfolio, event.price, times[j], event.reason, fee_model, slip_model
+                    )
+                    tracked = portfolio.position
+
             equities.append(portfolio.equity(closes[j]))
 
         # Принудительно закрыть открытую позицию в конце данных.

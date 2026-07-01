@@ -25,6 +25,10 @@ class OrderReason(StrEnum):
     EXIT = "exit"
     REVERSE = "reverse"
     FINAL = "final"  # принудительное закрытие в конце данных
+    STOP_LOSS = "stop_loss"  # BT-5: intrabar SL
+    TAKE_PROFIT = "take_profit"  # BT-5: intrabar TP
+    TRAILING_STOP = "trailing_stop"  # BT-5: intrabar trailing stop
+    LIQUIDATION = "liquidation"  # BT-5: пробой поддерживающей маржи
 
 
 @dataclass(frozen=True)
