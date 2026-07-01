@@ -96,9 +96,7 @@ def test_pagination_across_batches() -> None:
     transport = FakeBinanceTransport(_make_klines(start_ms, 2500), page_limit=1000)
     client = BinanceFuturesClient(transport=transport)
 
-    df = client.fetch_klines(
-        "BTCUSDT", "1h", _dt(2024, 1, 1), _dt(2024, 4, 20), limit=1000
-    )
+    df = client.fetch_klines("BTCUSDT", "1h", _dt(2024, 1, 1), _dt(2024, 4, 20), limit=1000)
 
     assert df.height == 2500
     assert transport.calls >= 3

@@ -12,10 +12,7 @@ from trading_research.config import ExperimentConfig, load_experiment_config
 from trading_research.domain import TimeSlice, TimeSliceKind
 
 EXAMPLE_CONFIG = (
-    Path(__file__).resolve().parents[1]
-    / "configs"
-    / "experiments"
-    / "ma_cross_btc_1h_monthly.yaml"
+    Path(__file__).resolve().parents[1] / "configs" / "experiments" / "ma_cross_btc_1h_monthly.yaml"
 )
 
 

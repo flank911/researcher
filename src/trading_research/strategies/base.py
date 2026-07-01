@@ -31,9 +31,7 @@ class Strategy(Protocol):
         """Сколько баров прогрева нужно индикаторам при данных параметрах."""
         ...
 
-    def generate_signals(
-        self, data: pl.DataFrame, params: Mapping[str, Any]
-    ) -> pl.DataFrame:
+    def generate_signals(self, data: pl.DataFrame, params: Mapping[str, Any]) -> pl.DataFrame:
         """Добавить индикаторы и булевы сигнальные колонки к ``data``."""
         ...
 

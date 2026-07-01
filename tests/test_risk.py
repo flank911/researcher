@@ -120,9 +120,7 @@ def test_evaluate_trailing_uses_prebar_extreme() -> None:
 
 def test_evaluate_updates_extreme_when_no_exit() -> None:
     rm = RiskManager(_exec(trailing_stop_pct=0.50))
-    event, new_extreme = rm.evaluate(
-        _long(), 10_000.0, 100.0, high=130.0, low=99.0, bar_open=100.0
-    )
+    event, new_extreme = rm.evaluate(_long(), 10_000.0, 100.0, high=130.0, low=99.0, bar_open=100.0)
     assert event is None
     assert new_extreme == pytest.approx(130.0)
 

@@ -63,16 +63,10 @@ class BacktestEngine:
         times: list[datetime] = signals["open_time"].to_list()
         closes: list[float] = [float(x) for x in signals["close"].to_list()]
         opens: list[float] = (
-            [float(x) for x in signals["open"].to_list()]
-            if "open" in signals.columns
-            else closes
+            [float(x) for x in signals["open"].to_list()] if "open" in signals.columns else closes
         )
-        highs: list[float] = (
-            [float(x) for x in signals["high"].to_list()] if has_hl else closes
-        )
-        lows: list[float] = (
-            [float(x) for x in signals["low"].to_list()] if has_hl else closes
-        )
+        highs: list[float] = [float(x) for x in signals["high"].to_list()] if has_hl else closes
+        lows: list[float] = [float(x) for x in signals["low"].to_list()] if has_hl else closes
         longs: list[bool] = [bool(x) for x in signals[LONG_SIGNAL].to_list()]
         shorts: list[bool] = [bool(x) for x in signals[SHORT_SIGNAL].to_list()]
         n = len(times)

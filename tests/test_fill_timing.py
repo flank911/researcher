@@ -109,9 +109,7 @@ def test_current_close_mode_fills_at_close() -> None:
             (105.0, 110.0, False, False),
         ]
     )
-    result = BacktestEngine().run(
-        signals, _exec(signal_lag=0, fill_on=FillOn.CURRENT_CLOSE)
-    )
+    result = BacktestEngine().run(signals, _exec(signal_lag=0, fill_on=FillOn.CURRENT_CLOSE))
     assert len(result.trades) == 1
     assert result.trades[0].entry_price == 100.0  # signal-bar close
 

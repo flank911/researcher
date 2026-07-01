@@ -87,9 +87,7 @@ def test_min_bars_filters_short_windows() -> None:
 
 def test_min_bars_requires_timeframe() -> None:
     with pytest.raises(ValueError, match="requires timeframe"):
-        generate_time_slices(
-            TimeSliceKind.MONTH, _dt(2024, 1, 1), _dt(2024, 2, 1), min_bars=100
-        )
+        generate_time_slices(TimeSliceKind.MONTH, _dt(2024, 1, 1), _dt(2024, 2, 1), min_bars=100)
 
 
 def test_bad_range_raises() -> None:

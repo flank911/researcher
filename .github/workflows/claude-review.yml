@@ -1,0 +1,67 @@
+name: Claude code review
+
+# Автоматическое ревью каждого PR в main по двум осям:
+#   1) качество кода (читаемость, дублирование, типобезопасность, тесты,
+#      архитектурные принципы из README/tickets);
+#   2) корректность задачи — соответствие DoD связанного тикета.
+# ID тикета берётся из тела PR или имени ветки (например, BT-3, INF-4).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+  id-token: write
+
+jobs:
+  review:
+    name: Claude review
+    # Секрет может отсутствовать в форках — не роняем пайплайн.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: true
+          prompt: |
+            Ты — ревьюер pull request в репозитории trading-research (RU-проект).
+            Отвечай по-русски, кратко и по делу. Это PR #${{ github.event.pull_request.number }}.
+
+            Шаги ревью:
+            1. Определи ID связанного тикета из тела PR или имени ветки
+               (`${{ github.event.pull_request.head.ref }}`) — формат вроде BT-3, INF-4, DATA-2.
+               Если нашёл — прочитай `tickets/<ID>.md` и его раздел «Критерии приёмки (DoD)».
+               Если ID не найден — отметь это как замечание к процессу.
+            2. Посмотри дифф PR (изменённые файлы) и оцени по двум осям:
+               - **Качество кода:** читаемость, дублирование, типобезопасность,
+                 наличие и адекватность тестов, соответствие архитектурным принципам
+                 из `README.md` и `tickets/README.md` (стратегия — чистый генератор
+                 сигналов; ExecutionModel отделён от StrategyParams; анти-look-ahead и т.п.).
+               - **Корректность задачи:** для каждого пункта DoD тикета укажи,
+                 реализован ли он в диффе (✅/⚠️/❌) с ссылкой на файл; отметь
+                 расхождения с описанием тикета.
+            3. Оставь ОДИН сводный комментарий-ревью со структурой:
+               «## Ревью Claude», далее «### Качество кода» и «### Соответствие DoD
+               <ID>» (таблица пунктов), и «### Вердикт» (одно из: готово к merge /
+               нужны правки / блокеры). Конкретные баги можно оставить инлайн-комментариями.
+
+            Только ревью — не меняй код и не пуш. Будь строг к корректности, но не
+            придирайся к стилю, который уже принят в проекте.
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*)"

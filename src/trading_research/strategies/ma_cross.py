@@ -38,9 +38,7 @@ class MovingAverageCrossStrategy:
         _, slow = _parse_params(params)
         return slow
 
-    def generate_signals(
-        self, data: pl.DataFrame, params: Mapping[str, Any]
-    ) -> pl.DataFrame:
+    def generate_signals(self, data: pl.DataFrame, params: Mapping[str, Any]) -> pl.DataFrame:
         fast, slow = _parse_params(params)
         out = data.with_columns(
             pl.col("close").rolling_mean(fast).alias("fast_ma"),

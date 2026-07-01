@@ -50,6 +50,4 @@ def test_stable_across_processes() -> None:
         for _ in range(2)
     ]
     assert env_runs[0] == env_runs[1]
-    assert env_runs[0] == stable_hash(
-        {"strategy": "ma_cross", "fast_ma": 20, "slow_ma": 100}
-    )
+    assert env_runs[0] == stable_hash({"strategy": "ma_cross", "fast_ma": 20, "slow_ma": 100})
