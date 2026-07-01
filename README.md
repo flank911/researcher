@@ -61,9 +61,36 @@ pre-commit install
 
 ```bash
 ruff check .
+ruff format --check .
 mypy
-pytest
+pytest --cov=trading_research
 ```
+
+## CI и код-ревью
+
+Каждый PR в `main` проходит два автоматических пайплайна (см. `.github/workflows/`):
+
+- **Quality gate** (`quality.yml`) — `ruff check`, `ruff format --check`, `mypy`,
+  `pytest` с coverage на матрице Python 3.11–3.13. Падение любого шага блокирует merge.
+- **Claude review** (`claude-review.yml`) — AI-ревьюер комментирует PR по двум осям:
+  *качество кода* (читаемость, дублирование, типобезопасность, тесты, архитектурные
+  принципы) и *корректность задачи* (сверка диффа с DoD связанного тикета). ID тикета
+  берётся из тела PR или имени ветки, поэтому **указание тикета в PR обязательно**
+  (см. [PR template](.github/pull_request_template.md)).
+
+Что требуется для merge в `main` (branch protection):
+
+- зелёный **Quality gate** на всех версиях Python из матрицы;
+- пройденное ревью (нет неразрешённых блокеров от Claude review / ревьюеров);
+- запрещён прямой push в `main` — только через PR.
+
+Настройка (одноразово, админом репозитория):
+
+- Секрет `ANTHROPIC_API_KEY` в *Settings → Secrets and variables → Actions*
+  (нужен для Claude review).
+- *Settings → Branches → Add branch ruleset* для `main`: require status checks
+  (выбрать джобы `checks` из Quality gate), require pull request before merging,
+  block direct pushes.
 
 ## План работ
 

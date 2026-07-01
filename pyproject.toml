@@ -22,7 +22,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "ruff>=0.5",
+    "pytest-cov>=5.0",
+    "ruff==0.15.20",
     "mypy>=1.10",
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
@@ -52,3 +53,10 @@ packages = ["trading_research"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["trading_research"]
+
+[tool.coverage.report]
+show_missing = true

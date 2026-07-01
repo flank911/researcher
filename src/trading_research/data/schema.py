@@ -56,6 +56,5 @@ def timeframe_to_ms(timeframe: str) -> int:
         return TIMEFRAME_MS[timeframe]
     except KeyError:
         raise ValueError(
-            f"Unsupported timeframe: {timeframe!r}. "
-            f"Supported: {', '.join(TIMEFRAME_MS)}"
+            f"Unsupported timeframe: {timeframe!r}. Supported: {', '.join(TIMEFRAME_MS)}"
         ) from None

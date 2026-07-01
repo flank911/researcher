@@ -1,7 +1,7 @@
 # INF-4 — CI-пайплайн для код-ревью merge requests
 
 - **Эпик:** E0 — Scaffolding & инфраструктура
-- **Статус:** todo
+- **Статус:** done
 - **Зависимости:** INF-1
 
 ## Описание
@@ -35,9 +35,23 @@ CI-пайплайн, который на каждый pull/merge request в `mai
 
 ## Критерии приёмки (DoD)
 
-- [ ] Workflow запускается на каждый PR в `main` и гоняет ruff/mypy/pytest.
-- [ ] Красный quality gate блокирует merge (branch protection включён).
-- [ ] На PR появляется автоматический ревью-комментарий с оценкой качества кода
-      и соответствия DoD тикета.
-- [ ] Есть PR template с полем «связанный тикет» и чек-листом DoD.
-- [ ] Документация в `README`: как проходит ревью и что требуется для merge.
+- [x] Workflow запускается на каждый PR в `main` и гоняет ruff/mypy/pytest
+      (`.github/workflows/quality.yml`, матрица Python 3.11–3.13, pytest+coverage).
+- [x] Красный quality gate блокирует merge — механизм готов; ruleset `main`
+      включается админом репозитория (инструкция в `README` → «CI и код-ревью»).
+- [x] На PR появляется автоматический ревью-комментарий с оценкой качества кода
+      и соответствия DoD тикета (`.github/workflows/claude-review.yml`;
+      требует секрет `ANTHROPIC_API_KEY`).
+- [x] Есть PR template с полем «связанный тикет» и чек-листом DoD
+      (`.github/pull_request_template.md`).
+- [x] Документация в `README`: как проходит ревью и что требуется для merge.
+
+## Примечание
+
+- CI использует `pip install -e ".[dev]"` (без lock-файла) с кэшем pip; версия
+  `ruff` зафиксирована (`==0.15.20`) в dev-deps и pre-commit, чтобы `ruff format
+  --check` был детерминирован между локалью и CI. В рамках задачи репозиторий
+  единожды приведён к формату этой версии.
+- Ручные шаги админа репозитория (вне git-диффа): добавить секрет
+  `ANTHROPIC_API_KEY` и включить branch ruleset для `main` (required status
+  checks = джоб `checks`, require PR before merge, block direct pushes).

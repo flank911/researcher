@@ -34,7 +34,7 @@
 | [INF-1](INF-1.md) | Каркас проекта и тулинг | done | — |
 | [INF-2](INF-2.md) | Доменные типы и конфиги (pydantic) | done | INF-1 |
 | [INF-3](INF-3.md) | Канонический хэш и воспроизводимость | done | INF-1 |
-| [INF-4](INF-4.md) | CI-пайплайн для код-ревью merge requests | todo | INF-1 |
+| [INF-4](INF-4.md) | CI-пайплайн для код-ревью merge requests | done | INF-1 |
 
 ### E1 — Data Core
 | ID | Заголовок | Статус | Зависимости |
