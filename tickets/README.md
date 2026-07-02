@@ -40,7 +40,7 @@
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
 | [DATA-1](DATA-1.md) | Клиент загрузки OHLCV (Binance futures) | done | INF-1 |
-| [DATA-2](DATA-2.md) | Parquet store (партиционирование) | todo | DATA-1 |
+| [DATA-2](DATA-2.md) | Parquet store (партиционирование) | done | DATA-1 |
 | [DATA-3](DATA-3.md) | Валидация данных | todo | DATA-2 |
 | [DATA-4](DATA-4.md) | Каталог датасетов + dataset_hash | todo | DATA-2, INF-3 |
 | [DATA-5](DATA-5.md) | DuckDB/Polars слой доступа (+warmup) | todo | DATA-2 |
@@ -55,13 +55,13 @@
 | [BT-4](BT-4.md) | Fees, slippage, sizing | done | BT-2 |
 | [BT-5](BT-5.md) | Risk: маржа/ликвидация, intrabar TP/SL | done | BT-4 |
 | [BT-6](BT-6.md) | Funding в PnL | todo | BT-4, DATA-2 |
-| [BT-7](BT-7.md) | MetricsCalculator | todo | BT-2 |
+| [BT-7](BT-7.md) | MetricsCalculator | done | BT-2 |
 | [BT-8](BT-8.md) | Golden test против внешнего движка | todo | BT-7 |
 
 ### E3 — Experiment Engine
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
-| [EXP-1](EXP-1.md) | Grid/Random search | todo | INF-2 |
+| [EXP-1](EXP-1.md) | Grid/Random search | done | INF-2 |
 | [EXP-2](EXP-2.md) | Непрерывный прогон + нарезка по слайсам | todo | BT-7, DATA-6, EXP-1 |
 | [EXP-3](EXP-3.md) | run_hash, dedupe, resume | todo | INF-3, EXP-2 |
 | [EXP-4](EXP-4.md) | Хранилище результатов (Parquet + каталог) | todo | EXP-2, DATA-4 |
