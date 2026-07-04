@@ -28,6 +28,11 @@ dev = [
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
 ]
+# Внешний движок для golden-теста (BT-8). Тяжёлая зависимость (pandas/bokeh/numpy),
+# поэтому вынесена отдельно: тест пропускается, если она не установлена.
+golden = [
+    "backtesting>=0.6",
+]
 
 [project.scripts]
 trading-research = "trading_research.cli.main:app"
@@ -48,6 +53,14 @@ python_version = "3.11"
 strict = true
 mypy_path = "src"
 packages = ["trading_research"]
+
+# numpy приходит транзитивно (pyarrow/polars, а также golden-extra). Его свежие
+# stubs используют PEP 695 (`type X = ...`), который mypy отвергает при
+# python_version=3.11. numpy мы не типизируем напрямую — пропускаем его импорты.
+[[tool.mypy.overrides]]
+module = ["numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
