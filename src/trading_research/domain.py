@@ -47,6 +47,18 @@ class FillOn(StrEnum):
     CURRENT_CLOSE = "current_close"  # допускается только для отладки
 
 
+class SliceMode(StrEnum):
+    """Режим нарезки метрик по ``TimeSlice`` (EXP-2).
+
+    ``CONTINUOUS`` — один непрерывный прогон на всю историю, equity нарезается по
+    окнам, баланс переносится между окнами (дефолт). ``INDEPENDENT`` — каждое окно
+    прогоняется отдельно со сбросом баланса к ``initial_balance``.
+    """
+
+    CONTINUOUS = "continuous"
+    INDEPENDENT = "independent"
+
+
 class TimeSlice(FrozenModel):
     """Временное окно — сущность первого класса.
 

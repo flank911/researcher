@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from trading_research.domain import SCHEMA_VERSION, ExecutionModel, TimeSliceKind
+from trading_research.domain import SCHEMA_VERSION, ExecutionModel, SliceMode, TimeSliceKind
 
 
 class StrictModel(BaseModel):
@@ -62,6 +62,8 @@ class ExperimentConfig(StrictModel):
     strategy: StrategyConfig
     params_grid: dict[str, list[Any]] = Field(default_factory=dict)
     execution: ExecutionModel
+    # EXP-2: непрерывный прогон с переносом баланса (дефолт) либо независимые окна.
+    slice_mode: SliceMode = SliceMode.CONTINUOUS
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
