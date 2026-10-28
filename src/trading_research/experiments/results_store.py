@@ -286,6 +286,16 @@ class ResultsStore:
             ).fetchone()
         return _row_to_record(run_row, metric_row)
 
+    def all_runs(self) -> list[RunRecord]:
+        """Все раны каталога с метриками (для аналитики, AN-1)."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            run_rows = conn.execute("SELECT * FROM runs ORDER BY run_hash").fetchall()
+            metric_rows = {
+                r["run_hash"]: r for r in conn.execute("SELECT * FROM run_metrics").fetchall()
+            }
+        return [_row_to_record(rr, metric_rows.get(rr["run_hash"])) for rr in run_rows]
+
     def load_trades(self, run_hash: str) -> pl.DataFrame:
         """Прочитать сделки рана (пустой DataFrame со схемой, если артефакта нет)."""
         path = self._run_dir(run_hash) / "trades.parquet"

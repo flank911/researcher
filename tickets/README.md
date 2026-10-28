@@ -71,7 +71,7 @@
 ### E4 — Analytics
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
-| [AN-1](AN-1.md) | Таблица parameter_performance_by_slice | todo | EXP-4 |
+| [AN-1](AN-1.md) | Таблица parameter_performance_by_slice | done | EXP-4 |
 | [AN-2](AN-2.md) | Ранжирование лучших параметров по слайсу | todo | AN-1 |
 | [AN-3](AN-3.md) | Stability score (robust, вектор) | todo | AN-1 |
 | [AN-4](AN-4.md) | Heatmap и плоты | todo | AN-1 |
