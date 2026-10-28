@@ -48,6 +48,10 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 
+[tool.ruff.lint.per-file-ignores]
+# Typer требует вызовов в дефолтах аргументов (Option/Argument) — B008 неизбежен.
+"src/trading_research/cli/main.py" = ["B008"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
