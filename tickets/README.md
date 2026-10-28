@@ -81,7 +81,7 @@
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
 | [WF-1](WF-1.md) | Train/test фолды | done | DATA-6 |
-| [WF-2](WF-2.md) | WF-оркестратор (out-of-sample) | todo | WF-1, EXP-2, AN-3 |
+| [WF-2](WF-2.md) | WF-оркестратор (out-of-sample) | done | WF-1, EXP-2, AN-3 |
 | [WF-3](WF-3.md) | Untouched holdout / контроль переоптимизации | todo | WF-2 |
 
 ### E6 — Market Regimes
