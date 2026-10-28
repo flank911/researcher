@@ -15,11 +15,14 @@ from trading_research.analytics.queries import (
     REGIME_SLOTS,
     PerformanceRecord,
     build_parameter_performance,
+    load_performance_table,
     param_hash,
     params_by_symbol,
     params_by_time,
     params_by_timeframe,
     performance_from_store,
+    rank_params,
+    save_performance_table,
     slice_param_performance,
 )
 from trading_research.backtest.metrics import Metrics
@@ -215,3 +218,70 @@ def test_invalid_axis_and_metric_raise() -> None:
         slice_param_performance(table, axis="nope")
     with pytest.raises(ValueError, match="metric"):
         slice_param_performance(table, axis="time", metric="reliable")
+
+
+# --- AN-2: ranking ----------------------------------------------------------
+
+
+def _ranking_table() -> pl.DataFrame:
+    # P1: 10 и 20 (BTC), P2: 5 (BTC), P1: 30 (ETH/4h).
+    records = [
+        _record(P1, "2024-01", symbol="BTCUSDT", timeframe="1h", total=10.0),
+        _record(P1, "2024-02", symbol="BTCUSDT", timeframe="1h", total=20.0),
+        _record(P2, "2024-01", symbol="BTCUSDT", timeframe="1h", total=5.0),
+        _record(P1, "2024-01", symbol="ETHUSDT", timeframe="4h", total=30.0),
+    ]
+    return build_parameter_performance(records)
+
+
+def test_rank_params_global_orders_by_metric() -> None:
+    ranked = rank_params(_ranking_table(), metric="total_return_pct", top=20)
+    assert ranked["rank"].to_list() == [1, 2]  # 2 комбинации параметров
+    # P1 среднее = (10+20+30)/3 = 20 > P2 = 5 → P1 первый.
+    assert ranked["param_hash"][0] == param_hash(P1)
+    assert ranked["total_return_pct"][0] == pytest.approx(20.0)
+
+
+def test_rank_params_top_limits_rows() -> None:
+    ranked = rank_params(_ranking_table(), top=1)
+    assert ranked.height == 1
+    assert ranked["param_hash"][0] == param_hash(P1)
+
+
+def test_rank_params_filter_by_symbol() -> None:
+    ranked = rank_params(_ranking_table(), symbol="BTCUSDT")
+    # ETH-строка отфильтрована → P1 среднее = (10+20)/2 = 15.
+    p1 = ranked.filter(pl.col("param_hash") == param_hash(P1))
+    assert p1["total_return_pct"][0] == pytest.approx(15.0)
+
+
+def test_rank_params_by_slice_ranks_within_group() -> None:
+    ranked = rank_params(_ranking_table(), by="time", top=1)
+    # По одному лучшему на слайс.
+    assert set(ranked["time_slice_id"].to_list()) == {"2024-01", "2024-02"}
+    assert ranked.filter(pl.col("rank") > 1).height == 0
+    # На 2024-01 лучший — P1 (ETH 30 даёт среднее 20 > P2 5).
+    jan = ranked.filter(pl.col("time_slice_id") == "2024-01")
+    assert jan["param_hash"][0] == param_hash(P1)
+
+
+def test_rank_params_ascending() -> None:
+    ranked = rank_params(_ranking_table(), descending=False)
+    assert ranked["param_hash"][0] == param_hash(P2)  # худший первым
+
+
+def test_rank_params_invalid_args() -> None:
+    table = _ranking_table()
+    with pytest.raises(ValueError, match="metric"):
+        rank_params(table, metric="reliable")
+    with pytest.raises(ValueError, match="axis"):
+        rank_params(table, by="nope")
+    with pytest.raises(ValueError, match="top"):
+        rank_params(table, top=0)
+
+
+def test_save_load_performance_table_roundtrip(tmp_path: Path) -> None:
+    table = _multi_table()
+    path = save_performance_table(table, tmp_path / "sub" / "perf.parquet")
+    assert path.exists()
+    assert load_performance_table(path).equals(table)

@@ -2,17 +2,20 @@
 
 Склейка слоёв в один прогон по YAML-конфигу: данные из Parquet-store (DATA-5) →
 стратегия (BT-1) → сетка параметров (EXP-1) → временные окна (DATA-6) →
-непрерывный прогон с нарезкой по слайсам (EXP-2). Результат — таблица
-``parameter_performance_by_slice`` (вход для аналитики AN-1) в Parquet.
+непрерывный прогон с нарезкой по слайсам (EXP-2). Результат — каноническая таблица
+``parameter_performance_by_slice`` (AN-1) в Parquet, готовая для аналитики
+(``analyze-results``, AN-2).
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 
-import polars as pl
-
+from trading_research.analytics.queries import (
+    PerformanceRecord,
+    build_parameter_performance,
+    save_performance_table,
+)
 from trading_research.config import load_experiment_config
 from trading_research.data.storage.duckdb_store import DuckDBStore
 from trading_research.experiments.grid_search import expand_grid
@@ -20,7 +23,7 @@ from trading_research.experiments.orchestrator import run_experiment
 from trading_research.experiments.time_splitters import generate_time_slices
 from trading_research.strategies import get_strategy
 
-RESULTS_FILE = "metrics.parquet"
+RESULTS_FILE = "performance.parquet"
 
 
 def run_experiment_from_config(
@@ -29,16 +32,16 @@ def run_experiment_from_config(
     data_root: str | Path,
     results_root: str | Path,
 ) -> Path:
-    """Прогнать эксперимент по конфигу и записать пер-слайс метрики в Parquet.
+    """Прогнать эксперимент по конфигу и записать таблицу AN-1 в Parquet.
 
-    Возвращает путь к файлу результатов ``{results_root}/{name}/metrics.parquet``.
+    Возвращает путь к ``{results_root}/{name}/performance.parquet``.
     """
     cfg = load_experiment_config(config_path)
     strategy = get_strategy(cfg.strategy.name)
     combos = expand_grid(cfg.params_grid)
     store = DuckDBStore(data_root)
 
-    rows: list[dict[str, object]] = []
+    records: list[PerformanceRecord] = []
     for symbol in cfg.data.symbols:
         data = store.read_window(
             exchange=cfg.data.exchange,
@@ -55,6 +58,7 @@ def run_experiment_from_config(
             timeframe=cfg.data.timeframe,
             min_bars=cfg.time_slices.min_bars,
         )
+        slice_by_id = {sl.id: sl for sl in slices}
         result = run_experiment(
             data,
             strategy,
@@ -64,21 +68,21 @@ def run_experiment_from_config(
             cfg.data.timeframe,
             mode=cfg.slice_mode,
         )
-        for sm in result.per_slice:
-            rows.append(
-                {
-                    "symbol": symbol,
-                    "slice_id": sm.slice_id,
-                    **sm.params,
-                    **asdict(sm.metrics),
-                }
+        records.extend(
+            PerformanceRecord(
+                experiment_id=cfg.name,
+                strategy_name=cfg.strategy.name,
+                symbol=symbol,
+                timeframe=cfg.data.timeframe,
+                time_slice=slice_by_id[sm.slice_id],
+                params=sm.params,
+                metrics=sm.metrics,
             )
+            for sm in result.per_slice
+        )
 
-    out_dir = Path(results_root) / cfg.name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / RESULTS_FILE
-    pl.DataFrame(rows).write_parquet(out_path)
-    return out_path
+    table = build_parameter_performance(records)
+    return save_performance_table(table, Path(results_root) / cfg.name / RESULTS_FILE)
 
 
 __all__ = ["RESULTS_FILE", "run_experiment_from_config"]

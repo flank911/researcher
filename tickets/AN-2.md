@@ -1,7 +1,7 @@
 # AN-2 — Ранжирование лучших параметров по слайсу
 
 - **Эпик:** E4 — Analytics
-- **Статус:** todo
+- **Статус:** done
 - **Зависимости:** AN-1
 
 ## Описание
@@ -13,6 +13,18 @@
 
 ## Критерии приёмки (DoD)
 
-- [ ] CLI выдаёт top-20 по заданной метрике (например `stability_score`).
-- [ ] Корректная сортировка и фильтрация по символу/таймфрейму.
-- [ ] Тест на примере результатов.
+- [x] CLI выдаёт top-N по заданной метрике (`analyze-results --metric --top`).
+- [x] Корректная сортировка и фильтрация по символу/таймфрейму.
+- [x] Тест на примере результатов.
+
+## Примечание
+
+- `analytics/queries.py` → `rank_params(table, metric=, top=, by=, symbol=,
+  timeframe=, descending=)`: глобальный top-N или top-N на группу (`by` =
+  time/symbol/timeframe); фильтры symbol/timeframe; усреднение метрики по
+  `(param_hash × ось)`, ранг 1 — лучший. Плюс `save/load_performance_table`.
+- `cli/analyze_results.py` + команда `analyze-results --experiment --metric --top
+  [--by --symbol --timeframe --results-root]`; читает таблицу эксперимента.
+- Пайплайн связан: `run-experiment` теперь пишет каноническую таблицу AN-1
+  (`{results_root}/{name}/performance.parquet`), которую читает `analyze-results`.
+- `stability_score` (AN-3) подключится как ещё одна метрика/колонка той же таблицы.

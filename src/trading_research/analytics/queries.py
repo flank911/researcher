@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -187,6 +188,73 @@ def slice_param_performance(
         con.close()
 
 
+def rank_params(
+    table: pl.DataFrame,
+    *,
+    metric: str = "total_return_pct",
+    top: int = 20,
+    by: str | None = None,
+    symbol: str | None = None,
+    timeframe: str | None = None,
+    descending: bool = True,
+) -> pl.DataFrame:
+    """Top-N комбинаций параметров по ``metric`` (AN-2).
+
+    ``by`` (``time``/``symbol``/``timeframe``) ранжирует внутри каждого значения
+    оси (top-N на группу); без ``by`` — глобальный рейтинг. ``symbol``/``timeframe``
+    фильтруют строки до ранжирования. Значение метрики усредняется по строкам,
+    попавшим в группу (``param_hash`` × ось). Ранг 1 — лучший.
+    """
+    if metric not in QUERYABLE_METRICS:
+        raise ValueError(
+            f"metric {metric!r} not queryable; expected one of {sorted(QUERYABLE_METRICS)}"
+        )
+    if by is not None and by not in _AXES:
+        raise ValueError(f"unknown axis {by!r}; expected one of {sorted(_AXES)}")
+    if top <= 0:
+        raise ValueError(f"top must be > 0, got {top}")
+
+    df = table
+    if symbol is not None:
+        df = df.filter(pl.col("symbol") == symbol)
+    if timeframe is not None:
+        df = df.filter(pl.col("timeframe") == timeframe)
+
+    group_keys = ["param_hash"] if by is None else [_AXES[by], "param_hash"]
+    agg = df.group_by(group_keys).agg(
+        pl.first("params_json").alias("params_json"),
+        pl.col(metric).mean().alias(metric),
+        pl.len().alias("n"),
+    )
+
+    if by is None:
+        ranked = agg.sort(metric, descending=descending, nulls_last=True).head(top)
+        return ranked.with_row_index("rank", offset=1)
+
+    axis_col = _AXES[by]
+    ranked = agg.with_columns(
+        pl.col(metric)
+        .rank(method="ordinal", descending=descending)
+        .over(axis_col)
+        .cast(pl.Int64)
+        .alias("rank")
+    )
+    return ranked.filter(pl.col("rank") <= top).sort([axis_col, "rank"])
+
+
+def save_performance_table(table: pl.DataFrame, path: str | Path) -> Path:
+    """Сохранить таблицу производительности в Parquet (создаёт директории)."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    table.write_parquet(p)
+    return p
+
+
+def load_performance_table(path: str | Path) -> pl.DataFrame:
+    """Прочитать таблицу производительности из Parquet."""
+    return pl.read_parquet(path)
+
+
 def params_by_time(table: pl.DataFrame, *, metric: str = "total_return_pct") -> pl.DataFrame:
     """Срез params ↔ время (по ``time_slice_id``)."""
     return slice_param_performance(table, axis="time", metric=metric)
@@ -209,10 +277,13 @@ __all__ = [
     "REGIME_SLOTS",
     "PerformanceRecord",
     "build_parameter_performance",
+    "load_performance_table",
     "param_hash",
     "params_by_symbol",
     "params_by_time",
     "params_by_timeframe",
     "performance_from_store",
+    "rank_params",
+    "save_performance_table",
     "slice_param_performance",
 ]
