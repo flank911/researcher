@@ -1,4 +1,4 @@
-"""DATA-6 — генератор TimeSlice.
+"""DATA-6 — генератор TimeSlice (+ WF-1 — walk-forward фолды).
 
 Нарезает диапазон ``[start, end)`` на временные окна по календарю
 (year / quarter / month / week) либо в один custom-слайс. Каждое окно несёт
@@ -6,10 +6,15 @@
 
 Граничные (неполные) календарные окна клипуются к ``[start, end)`` и могут быть
 отброшены фильтром ``min_bars``.
+
+WF-1: ``generate_walk_forward_folds`` строит пары окон train/test для
+walk-forward — скользящие (rolling) либо расширяющиеся (anchored). Тест всегда
+идёт строго **после** train (без перекрытия), пары связаны ``fold``-индексом.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from trading_research.data.schema import timeframe_to_ms
@@ -142,3 +147,85 @@ def generate_time_slices(
             )
         )
     return slices
+
+
+@dataclass(frozen=True)
+class WalkForwardFold:
+    """Пара окон одного walk-forward фолда: ``train`` → ``test`` (строго после)."""
+
+    fold: int
+    train: TimeSlice
+    test: TimeSlice
+
+
+def generate_walk_forward_folds(
+    start: datetime,
+    end: datetime,
+    *,
+    train: timedelta,
+    test: timedelta,
+    step: timedelta,
+    warmup_bars: int = 0,
+    anchored: bool = False,
+) -> list[WalkForwardFold]:
+    """Сгенерировать walk-forward фолды в ``[start, end)``.
+
+    Args:
+        start, end: общий диапазон (полуинтервал ``[start, end)``).
+        train: длина окна обучения.
+        test: длина окна теста (идёт сразу после train, без перекрытия).
+        step: сдвиг между соседними фолдами.
+        warmup_bars: прогрев, приписываемый каждому окну.
+        anchored: ``True`` — train расширяется от ``start`` (expanding);
+            ``False`` — скользящее окно фиксированной длины (rolling).
+
+    Фолд включается, только если его ``test`` целиком помещается в ``[start, end)``
+    (частичные окна на конце не создаются).
+    """
+    start, end = _ensure_utc(start), _ensure_utc(end)
+    if end <= start:
+        raise ValueError(f"end must be after start: {start} >= {end}")
+    for name, span in (("train", train), ("test", test), ("step", step)):
+        if span <= timedelta(0):
+            raise ValueError(f"{name} must be positive, got {span}")
+
+    folds: list[WalkForwardFold] = []
+    k = 0
+    while True:
+        if anchored:
+            train_start = start
+            train_end = start + train + k * step
+        else:
+            train_start = start + k * step
+            train_end = train_start + train
+        test_start = train_end
+        test_end = test_start + test
+        if test_end > end:
+            break
+
+        folds.append(
+            WalkForwardFold(
+                fold=k,
+                train=TimeSlice(
+                    id=f"fold{k:02d}-train",
+                    start=train_start,
+                    end=train_end,
+                    label=f"fold{k:02d}-train",
+                    kind=TimeSliceKind.CUSTOM,
+                    role=TimeSliceRole.TRAIN,
+                    warmup_bars=warmup_bars,
+                ),
+                test=TimeSlice(
+                    id=f"fold{k:02d}-test",
+                    start=test_start,
+                    end=test_end,
+                    label=f"fold{k:02d}-test",
+                    kind=TimeSliceKind.CUSTOM,
+                    role=TimeSliceRole.TEST,
+                    warmup_bars=warmup_bars,
+                ),
+            )
+        )
+        k += 1
+
+    return folds
