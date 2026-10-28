@@ -41,8 +41,8 @@
 |----|-----------|--------|-------------|
 | [DATA-1](DATA-1.md) | Клиент загрузки OHLCV (Binance futures) | done | INF-1 |
 | [DATA-2](DATA-2.md) | Parquet store (партиционирование) | done | DATA-1 |
-| [DATA-3](DATA-3.md) | Валидация данных | todo | DATA-2 |
-| [DATA-4](DATA-4.md) | Каталог датасетов + dataset_hash | done | DATA-2, INF-3 |
+| [DATA-3](DATA-3.md) | Валидация данных | done | DATA-2 |
+| [DATA-4](DATA-4.md) | Каталог датасетов + dataset_hash | todo | DATA-2, INF-3 |
 | [DATA-5](DATA-5.md) | DuckDB/Polars слой доступа (+warmup) | todo | DATA-2 |
 | [DATA-6](DATA-6.md) | Генератор TimeSlice | done | INF-2 |
 
