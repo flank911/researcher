@@ -75,7 +75,7 @@
 | [AN-2](AN-2.md) | Ранжирование лучших параметров по слайсу | done | AN-1 |
 | [AN-3](AN-3.md) | Stability score (robust, вектор) | done | AN-1 |
 | [AN-4](AN-4.md) | Heatmap и плоты | done | AN-1 |
-| [AN-5](AN-5.md) | Экспорт CSV/Parquet + ноутбук | todo | AN-1 |
+| [AN-5](AN-5.md) | Экспорт CSV/Parquet + ноутбук | done | AN-1 |
 
 ### E5 — Walk-forward
 | ID | Заголовок | Статус | Зависимости |

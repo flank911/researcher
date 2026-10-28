@@ -14,6 +14,7 @@ import typer
 
 from trading_research import __version__
 from trading_research.cli.analyze_results import analyze_results, experiment_results_path
+from trading_research.cli.export_results import export_results
 from trading_research.cli.fetch_data import fetch_data
 from trading_research.cli.plot_heatmap import plot_experiment_heatmap
 from trading_research.cli.run_experiment import run_experiment_from_config
@@ -121,6 +122,31 @@ def plot_heatmap_cmd(
         time_slice=time_slice or None,
     )
     typer.echo(f"heatmap -> {saved}")
+
+
+@app.command("export-results")
+def export_results_cmd(
+    experiment: str = typer.Option(..., help="Имя эксперимента (имя из конфига)."),
+    kind: str = typer.Option(
+        "performance", help="Что экспортировать: performance/ranking/stability."
+    ),
+    fmt: str = typer.Option("csv", "--format", help="Формат: csv/parquet."),
+    metric: str = typer.Option("total_return_pct", help="Метрика (для ranking/stability)."),
+    top: int = typer.Option(20, help="Top-N для ranking."),
+    out: str = typer.Option("", help="Путь к файлу (по умолчанию в каталоге эксперимента)."),
+    results_root: Path = typer.Option(Path("data/results"), help="Корень результатов."),
+) -> None:
+    """Экспортировать сводную таблицу эксперимента в CSV/Parquet."""
+    default_out = results_root / experiment / f"export_{kind}.{fmt}"
+    saved = export_results(
+        experiment_results_path(results_root, experiment),
+        Path(out) if out else default_out,
+        kind=kind,
+        fmt=fmt,
+        metric=metric,
+        top=top,
+    )
+    typer.echo(f"export -> {saved}")
 
 
 if __name__ == "__main__":
