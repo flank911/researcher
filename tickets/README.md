@@ -64,7 +64,7 @@
 | [EXP-1](EXP-1.md) | Grid/Random search | done | INF-2 |
 | [EXP-2](EXP-2.md) | Непрерывный прогон + нарезка по слайсам | done | BT-7, DATA-6, EXP-1 |
 | [EXP-3](EXP-3.md) | run_hash, dedupe, resume | done | INF-3, EXP-2 |
-| [EXP-4](EXP-4.md) | Хранилище результатов (Parquet + каталог) | todo | EXP-2, DATA-4 |
+| [EXP-4](EXP-4.md) | Хранилище результатов (Parquet + каталог) | done | EXP-2, DATA-4 |
 | [EXP-5](EXP-5.md) | Параллельное исполнение | todo | EXP-4 |
 | [EXP-6](EXP-6.md) | CLI: fetch-data / run-experiment | todo | DATA-1, EXP-5 |
 
