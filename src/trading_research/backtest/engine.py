@@ -14,8 +14,13 @@ Risk (BT-5): защитные выходы (TP/SL/trailing) и ликвидац�
 уровень) описаны в ``backtest/risk.py``. Внутрибарная оценка требует колонок
 ``high``/``low``; при заданных TP/SL/trailing их отсутствие — ошибка.
 
+Funding (BT-6): опциональный ряд funding-ставок применяется к открытой позиции на
+границе бара (по ``open`` как цене на момент расчёта), до внутрибарных выходов.
+Знак — long платит при положительной ставке. Funding влияет на баланс/equity и
+учитывается отдельно (``BacktestResult.funding_total``, ``Trade.funding``).
+Отсутствие funding-данных не ломает прогон.
+
 Границы тикета (что будет добавлено позже):
-- BT-6: funding-платежи в PnL для futures;
 - BT-7: расчёт метрик и drawdown поверх equity_curve.
 """
 
@@ -27,6 +32,7 @@ from datetime import datetime
 import polars as pl
 
 from trading_research.backtest.fees import FeeModel
+from trading_research.backtest.funding import bucket_funding
 from trading_research.backtest.orders import OrderReason, Side
 from trading_research.backtest.portfolio import Portfolio, Trade
 from trading_research.backtest.risk import RiskManager
@@ -42,12 +48,18 @@ REQUIRED_COLUMNS = ("open_time", "close", LONG_SIGNAL, SHORT_SIGNAL)
 class BacktestResult:
     trades: list[Trade]
     equity_curve: pl.DataFrame  # columns: open_time, equity
+    funding_total: float = 0.0  # BT-6: суммарный funding за прогон (знаковый)
 
 
 class BacktestEngine:
     """Минимальный stop-and-reverse движок по барам."""
 
-    def run(self, signals: pl.DataFrame, execution: ExecutionModel) -> BacktestResult:
+    def run(
+        self,
+        signals: pl.DataFrame,
+        execution: ExecutionModel,
+        funding: pl.DataFrame | None = None,
+    ) -> BacktestResult:
         missing = [c for c in REQUIRED_COLUMNS if c not in signals.columns]
         if execution.fill_on is FillOn.NEXT_OPEN and "open" not in signals.columns:
             missing.append("open")
@@ -72,6 +84,7 @@ class BacktestEngine:
         n = len(times)
 
         wants = [self._desired_side(longs[i], shorts[i]) for i in range(n)]
+        per_bar_funding = bucket_funding(times, funding)
         lag = execution.signal_lag
         fee_model = FeeModel(execution.commission_rate)
         slip_model = SlippageModel(execution.slippage_pct)
@@ -97,7 +110,11 @@ class BacktestEngine:
                 if tracked is not None:
                     extreme = risk.initial_extreme(tracked)
 
-            # 2) Внутрибарные защитные выходы и ликвидация (после open, до close).
+            # 2) Funding на границе бара (по open как цене момента расчёта).
+            if per_bar_funding[j] != 0.0 and portfolio.position is not None:
+                portfolio.apply_funding(per_bar_funding[j], opens[j])
+
+            # 3) Внутрибарные защитные выходы и ликвидация (после open, до close).
             if has_hl and portfolio.position is not None:
                 event, extreme = risk.evaluate(
                     portfolio.position,
@@ -121,7 +138,11 @@ class BacktestEngine:
             equities[-1] = portfolio.balance
 
         equity_curve = pl.DataFrame({"open_time": times, "equity": equities})
-        return BacktestResult(trades=list(portfolio.trades), equity_curve=equity_curve)
+        return BacktestResult(
+            trades=list(portfolio.trades),
+            equity_curve=equity_curve,
+            funding_total=portfolio.funding_total,
+        )
 
     @staticmethod
     def _desired_side(long_sig: bool, short_sig: bool) -> Side | None:
