@@ -1,7 +1,9 @@
 """BT-2 — портфель: баланс, открытая позиция, реализованные сделки.
 
-Учитывает только механику позиций и реализованный PnL. Комиссии/слиппедж
-(поле ``fees`` зарезервировано) добавляются в BT-4.
+Учитывает механику позиций, реализованный PnL, комиссии/слиппедж (BT-4) и
+funding-платежи (BT-6). Funding — отдельный денежный поток: влияет на баланс и
+equity, но учитывается обособленно (``funding_total`` в портфеле,
+``Trade.funding`` по сделке).
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ class Trade:
     pnl_pct: float
     fees: float
     reason: OrderReason
+    funding: float = 0.0  # BT-6: суммарный funding за жизнь позиции (знаковый)
 
 
 class Portfolio:
@@ -36,6 +39,8 @@ class Portfolio:
         self.balance: float = initial_balance
         self.position: Position | None = None
         self.trades: list[Trade] = []
+        self.funding_total: float = 0.0  # BT-6: накопленный funding за прогон
+        self._position_funding: float = 0.0  # funding текущей открытой позиции
 
     def equity(self, price: float) -> float:
         """Маркированный по рынку капитал при текущей цене."""
@@ -49,9 +54,25 @@ class Portfolio:
         if qty <= 0:
             raise ValueError(f"qty must be > 0, got {qty}")
         self.balance -= fee
+        self._position_funding = 0.0
         self.position = Position(
             side=side, qty=qty, entry_price=price, entry_time=time, entry_fee=fee
         )
+
+    def apply_funding(self, rate: float, mark_price: float) -> float:
+        """Применить funding к открытой позиции (BT-6).
+
+        Знак по бирже: при ``rate > 0`` long платит, short получает. Возвращает
+        знаковый денежный поток (отрицательный = издержка). Нет позиции или
+        нулевая ставка — no-op.
+        """
+        if self.position is None or rate == 0.0:
+            return 0.0
+        cash = -self.position.side.sign * rate * self.position.qty * mark_price
+        self.balance += cash
+        self._position_funding += cash
+        self.funding_total += cash
+        return cash
 
     def close(self, price: float, time: datetime, reason: OrderReason, fee: float = 0.0) -> Trade:
         if self.position is None:
@@ -71,7 +92,9 @@ class Portfolio:
             pnl_pct=pnl_pct,
             fees=pos.entry_fee + fee,
             reason=reason,
+            funding=self._position_funding,
         )
         self.trades.append(trade)
         self.position = None
+        self._position_funding = 0.0
         return trade
