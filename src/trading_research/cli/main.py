@@ -15,6 +15,7 @@ import typer
 from trading_research import __version__
 from trading_research.cli.analyze_results import analyze_results, experiment_results_path
 from trading_research.cli.fetch_data import fetch_data
+from trading_research.cli.plot_heatmap import plot_experiment_heatmap
 from trading_research.cli.run_experiment import run_experiment_from_config
 
 app = typer.Typer(
@@ -91,6 +92,35 @@ def analyze_results_cmd(
         timeframe=timeframe or None,
     )
     typer.echo(str(ranked))
+
+
+@app.command("plot-heatmap")
+def plot_heatmap_cmd(
+    experiment: str = typer.Option(..., help="Имя эксперимента (имя из конфига)."),
+    x: str = typer.Option(..., help="Параметр по оси X (ключ из params)."),
+    y: str = typer.Option(..., help="Параметр по оси Y (ключ из params)."),
+    metric: str = typer.Option("total_return_pct", help="Метрика (цвет ячеек)."),
+    agg: str = typer.Option("median", help="Агрегат: median/mean/min/max."),
+    symbol: str = typer.Option("", help="Фильтр по символу."),
+    timeframe: str = typer.Option("", help="Фильтр по таймфрейму."),
+    time_slice: str = typer.Option("", help="Фильтр по time_slice_id (напр. год/месяц)."),
+    out: str = typer.Option("", help="Путь к PNG (по умолчанию в каталоге эксперимента)."),
+    results_root: Path = typer.Option(Path("data/results"), help="Корень результатов."),
+) -> None:
+    """Построить PNG-heatmap ``x × y`` по метрике из результатов эксперимента."""
+    default_out = results_root / experiment / f"heatmap_{x}_{y}_{metric}.png"
+    saved = plot_experiment_heatmap(
+        experiment_results_path(results_root, experiment),
+        Path(out) if out else default_out,
+        x=x,
+        y=y,
+        metric=metric,
+        agg=agg,
+        symbol=symbol or None,
+        timeframe=timeframe or None,
+        time_slice=time_slice or None,
+    )
+    typer.echo(f"heatmap -> {saved}")
 
 
 if __name__ == "__main__":
