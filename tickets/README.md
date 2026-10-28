@@ -66,7 +66,7 @@
 | [EXP-3](EXP-3.md) | run_hash, dedupe, resume | done | INF-3, EXP-2 |
 | [EXP-4](EXP-4.md) | Хранилище результатов (Parquet + каталог) | done | EXP-2, DATA-4 |
 | [EXP-5](EXP-5.md) | Параллельное исполнение | done | EXP-4 |
-| [EXP-6](EXP-6.md) | CLI: fetch-data / run-experiment | todo | DATA-1, EXP-5 |
+| [EXP-6](EXP-6.md) | CLI: fetch-data / run-experiment | done | DATA-1, EXP-5 |
 
 ### E4 — Analytics
 | ID | Заголовок | Статус | Зависимости |
