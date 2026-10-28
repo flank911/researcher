@@ -25,6 +25,27 @@ CANDLE_SCHEMA: dict[str, pl.DataType] = {
 
 CANDLE_COLUMNS: tuple[str, ...] = tuple(CANDLE_SCHEMA.keys())
 
+# REG-1 — схемы внешних рыночных рядов (ключ времени — ``open_time``, UTC мс).
+FUNDING_SCHEMA: dict[str, pl.DataType] = {
+    "open_time": UTC_MS,
+    "funding_rate": pl.Float64(),
+}
+OPEN_INTEREST_SCHEMA: dict[str, pl.DataType] = {
+    "open_time": UTC_MS,
+    "open_interest": pl.Float64(),
+    "open_interest_value": pl.Float64(),
+}
+LONG_SHORT_RATIO_SCHEMA: dict[str, pl.DataType] = {
+    "open_time": UTC_MS,
+    "long_short_ratio": pl.Float64(),
+    "long_account": pl.Float64(),
+    "short_account": pl.Float64(),
+}
+
+FUNDING_COLUMNS: tuple[str, ...] = tuple(FUNDING_SCHEMA.keys())
+OPEN_INTEREST_COLUMNS: tuple[str, ...] = tuple(OPEN_INTEREST_SCHEMA.keys())
+LONG_SHORT_RATIO_COLUMNS: tuple[str, ...] = tuple(LONG_SHORT_RATIO_SCHEMA.keys())
+
 
 def empty_candles() -> pl.DataFrame:
     """Пустой DataFrame со схемой свечей."""

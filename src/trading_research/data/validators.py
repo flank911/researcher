@@ -163,6 +163,90 @@ def save_report(report: ValidationReport, path: str | Path) -> None:
     p.write_text(report.model_dump_json(indent=2), encoding="utf-8")
 
 
+class SeriesValidationReport(FrozenModel):
+    """Отчёт о качестве произвольного временного ряда (REG-1: funding/OI/LS)."""
+
+    timeframe: str
+    step_ms: int
+    total_rows: int
+    gaps: list[Gap] = Field(default_factory=list)
+    missing_total: int = 0
+    duplicate_times: list[datetime] = Field(default_factory=list)
+    is_monotonic: bool = True
+    non_finite: int = 0  # строк с NaN/inf в value-колонках
+    negative: int = 0  # строк с отрицательными значениями в non_negative-колонках
+
+    @property
+    def is_clean(self) -> bool:
+        return (
+            not self.gaps
+            and not self.duplicate_times
+            and self.is_monotonic
+            and self.non_finite == 0
+            and self.negative == 0
+        )
+
+
+def validate_series(
+    df: pl.DataFrame,
+    *,
+    timeframe: str,
+    value_columns: tuple[str, ...] = (),
+    non_negative_columns: tuple[str, ...] = (),
+    expected_start: datetime | None = None,
+    expected_end: datetime | None = None,
+    listing_at: datetime | None = None,
+) -> SeriesValidationReport:
+    """Проверить временной ряд по подходу DATA-3: пропуски/дубли/монотонность.
+
+    ``value_columns`` проверяются на NaN/inf; ``non_negative_columns`` — на
+    отрицательные значения (funding может быть отрицательным — его туда не кладём).
+    """
+    if "open_time" not in df.columns:
+        raise ValueError("series missing required column 'open_time'")
+    missing_cols = [c for c in (*value_columns, *non_negative_columns) if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"series missing columns: {missing_cols}")
+
+    step = timeframe_to_ms(timeframe)
+    total = df.height
+    listing = _to_utc(listing_at)
+    if total == 0:
+        return SeriesValidationReport(timeframe=timeframe, step_ms=step, total_rows=0)
+
+    ms_orig: list[int] = df["open_time"].dt.epoch("ms").to_list()
+    is_monotonic = all(a < b for a, b in zip(ms_orig, ms_orig[1:], strict=False))
+    counts = Counter(ms_orig)
+    duplicate_times = sorted(_from_ms(m) for m, c in counts.items() if c > 1)
+    gaps = _detect_gaps(
+        sorted(counts),
+        step=step,
+        expected_start=_effective_start(expected_start, listing),
+        expected_end=_to_utc(expected_end),
+    )
+
+    non_finite = 0
+    if value_columns:
+        bad = pl.any_horizontal(pl.col(c).is_nan() | pl.col(c).is_infinite() for c in value_columns)
+        non_finite = df.filter(bad).height
+    negative = 0
+    if non_negative_columns:
+        neg = pl.any_horizontal(pl.col(c) < 0 for c in non_negative_columns)
+        negative = df.filter(neg).height
+
+    return SeriesValidationReport(
+        timeframe=timeframe,
+        step_ms=step,
+        total_rows=total,
+        gaps=gaps,
+        missing_total=sum(g.missing_bars for g in gaps),
+        duplicate_times=duplicate_times,
+        is_monotonic=is_monotonic,
+        non_finite=non_finite,
+        negative=negative,
+    )
+
+
 def _detect_gaps(
     uniq_ms: list[int],
     *,
@@ -228,4 +312,11 @@ def _from_ms(ms: int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
 
-__all__ = ["Gap", "ValidationReport", "save_report", "validate_candles"]
+__all__ = [
+    "Gap",
+    "SeriesValidationReport",
+    "ValidationReport",
+    "save_report",
+    "validate_candles",
+    "validate_series",
+]
