@@ -7,7 +7,8 @@
   свою директорию, поэтому конкурентная запись артефактов не конфликтует.
 - **Сводка** (индекс ранов ``runs`` + метрики ``run_metrics``) — SQLite-каталог.
   Открывается в режиме WAL с ``busy_timeout``, так что несколько писателей
-  сериализуются без ошибок «database is locked».
+  сериализуются без ошибок «database is locked». Для многопроцессной записи
+  (EXP-5) окно первичного создания БД дополнительно защищено ретраем на lock.
 
 Индекс рана хранит идентичность (``run_hash``, стратегия, символ, таймфрейм, слайс,
 ``dataset_hash``, git-commit), статус, пути к артефактам и текст ошибки. Запись
@@ -22,7 +23,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -38,6 +40,16 @@ from trading_research.experiments.cache import RunSpec
 from trading_research.hashing import canonical_json
 
 _BUSY_TIMEOUT_MS = 30_000
+# EXP-5: при конкурентной записи из нескольких процессов окно первичного
+# создания БД (до установления WAL) не покрывается busy_timeout — ретраим.
+_MAX_WRITE_RETRIES = 12
+_RETRY_BACKOFF_S = 0.05
+
+
+def _is_locked_error(exc: sqlite3.OperationalError) -> bool:
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
 
 TRADE_SCHEMA: dict[str, pl.DataType] = {
     "entry_time": UTC_MS,
@@ -134,9 +146,27 @@ class ResultsStore:
         finally:
             conn.close()
 
+    def _write(self, action: Callable[[sqlite3.Connection], None]) -> None:
+        """Выполнить запись с ретраем на 'database is locked' (многопроцессность)."""
+        last: sqlite3.OperationalError | None = None
+        for attempt in range(_MAX_WRITE_RETRIES):
+            try:
+                with self._connect() as conn:
+                    action(conn)
+                    conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                if not _is_locked_error(exc):
+                    raise
+                last = exc
+                time.sleep(_RETRY_BACKOFF_S * (attempt + 1))
+        assert last is not None  # noqa: S101 — инвариант цикла
+        raise last
+
     def _init_db(self) -> None:
         metric_cols = ",\n".join(f"{c} REAL" for c in _METRIC_COLUMNS)
-        with self._connect() as conn:
+
+        def _create(conn: sqlite3.Connection) -> None:
             conn.executescript(
                 f"""
                 CREATE TABLE IF NOT EXISTS runs (
@@ -164,7 +194,8 @@ class ResultsStore:
                 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs (status);
                 """
             )
-            conn.commit()
+
+        self._write(_create)
 
     def _run_dir(self, run_hash: str) -> Path:
         return self.results_dir / f"run_hash={run_hash}"
@@ -199,7 +230,8 @@ class ResultsStore:
             equity_path = str(equity_file)
 
         now = datetime.now(UTC).isoformat()
-        with self._connect() as conn:
+
+        def _persist(conn: sqlite3.Connection) -> None:
             conn.execute(
                 """
                 INSERT INTO runs (run_hash, strategy, symbol, timeframe, slice_id,
@@ -238,7 +270,8 @@ class ResultsStore:
                     """,
                     (run_hash, *_metric_values(metrics)),
                 )
-            conn.commit()
+
+        self._write(_persist)
         return run_hash
 
     def get_run(self, run_hash: str) -> RunRecord | None:
