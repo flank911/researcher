@@ -87,6 +87,6 @@
 ### E6 — Market Regimes
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
-| [REG-1](REG-1.md) | Доп. данные: funding/OI/LS ratio | todo | DATA-2 |
+| [REG-1](REG-1.md) | Доп. данные: funding/OI/LS ratio | done | DATA-2 |
 | [REG-2](REG-2.md) | Фичи режима + time_slice_features | todo | REG-1, DATA-6 |
 | [REG-3](REG-3.md) | Корреляции параметры↔режим | todo | REG-2, AN-1 |
