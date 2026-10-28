@@ -1,7 +1,7 @@
 # AN-4 — Heatmap и плоты
 
 - **Эпик:** E4 — Analytics
-- **Статус:** todo
+- **Статус:** done
 - **Зависимости:** AN-1
 
 ## Описание
@@ -14,6 +14,19 @@
 
 ## Критерии приёмки (DoD)
 
-- [ ] Генерится PNG для `atr_period × atr_mult` по выбранной метрике.
-- [ ] Поддержаны срезы по году/символу.
-- [ ] Smoke-тест построения.
+- [x] Генерится PNG для пары параметров (`x × y`, напр. `fast_ma × slow_ma`) по
+      выбранной метрике.
+- [x] Поддержаны срезы по году/символу (фильтры `symbol`/`timeframe`/`time_slice`).
+- [x] Smoke-тест построения.
+
+## Примечание
+
+- `analytics/plots.py`: `build_heatmap(table, x=, y=, metric=, agg=, symbol=,
+  timeframe=, time_slice=)` → `HeatmapData` (оси + 2D-сетка; значения параметров
+  берутся из `params_json`); `plot_heatmap(data, out)` рендерит PNG через
+  matplotlib (Agg, headless); `heatmap_to_png(...)` — всё в один вызов.
+- CLI `plot-heatmap --experiment --x --y --metric [--agg --symbol --timeframe
+  --time-slice --out --results-root]` (`cli/plot_heatmap.py`).
+- matplotlib добавлен в зависимости; для mypy — override `ignore_missing_imports`.
+- Общий x/y: heatmap строится по любой паре ключей параметров (пример `atr_*` —
+  иллюстративный для другой стратегии; MVP тестируется на `fast_ma × slow_ma`).

@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6.0",
     "typer>=0.12",
     "rich>=13.0",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +66,11 @@ packages = ["trading_research"]
 module = ["numpy.*"]
 follow_imports = "skip"
 follow_imports_for_stubs = true
+
+# matplotlib не поставляет type stubs — пропускаем его импорты (AN-4, plots).
+[[tool.mypy.overrides]]
+module = ["matplotlib.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
