@@ -161,10 +161,18 @@ def test_run_experiment_business_writes_metrics(tmp_path: Path) -> None:
     df = pl.read_parquet(out)
     # 1 символ × 1 комбинация × 2 месячных слайса (янв, фев).
     assert df.height == 2
-    assert {"symbol", "slice_id", "fast_ma", "slow_ma", "total_return_pct", "trades_count"} <= set(
-        df.columns
-    )
-    assert set(df["slice_id"].to_list()) == {"2024-01", "2024-02"}
+    assert {
+        "experiment_id",
+        "symbol",
+        "timeframe",
+        "time_slice_id",
+        "param_hash",
+        "params_json",
+        "total_return_pct",
+        "trades_count",
+    } <= set(df.columns)
+    assert set(df["time_slice_id"].to_list()) == {"2024-01", "2024-02"}
+    assert df["experiment_id"].to_list() == ["smoke_ma_cross"] * 2
 
 
 def test_cli_run_experiment_smoke(tmp_path: Path) -> None:
@@ -188,7 +196,45 @@ def test_cli_run_experiment_smoke(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "results ->" in result.output
-    assert (results_root / "smoke_ma_cross" / "metrics.parquet").exists()
+    assert (results_root / "smoke_ma_cross" / "performance.parquet").exists()
+
+
+def test_cli_analyze_results_smoke(tmp_path: Path) -> None:
+    data_root = tmp_path / "raw"
+    results_root = tmp_path / "results"
+    _seed_store(data_root)
+    cfg = tmp_path / "exp.yaml"
+    _write_config(cfg)
+    # Сначала прогон — он пишет таблицу результатов.
+    runner.invoke(
+        app,
+        [
+            "run-experiment",
+            "--config",
+            str(cfg),
+            "--data-root",
+            str(data_root),
+            "--results-root",
+            str(results_root),
+        ],
+    )
+    result = runner.invoke(
+        app,
+        [
+            "analyze-results",
+            "--experiment",
+            "smoke_ma_cross",
+            "--metric",
+            "total_return_pct",
+            "--top",
+            "5",
+            "--results-root",
+            str(results_root),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "param_hash" in result.output
+    assert "rank" in result.output
 
 
 def test_cli_version() -> None:

@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 
 from trading_research import __version__
+from trading_research.cli.analyze_results import analyze_results, experiment_results_path
 from trading_research.cli.fetch_data import fetch_data
 from trading_research.cli.run_experiment import run_experiment_from_config
 
@@ -68,6 +69,28 @@ def run_experiment_cmd(
     """Прогнать эксперимент по конфигу и записать пер-слайс метрики."""
     out = run_experiment_from_config(config, data_root=data_root, results_root=results_root)
     typer.echo(f"results -> {out}")
+
+
+@app.command("analyze-results")
+def analyze_results_cmd(
+    experiment: str = typer.Option(..., help="Имя эксперимента (имя из конфига)."),
+    metric: str = typer.Option("total_return_pct", help="Метрика ранжирования."),
+    top: int = typer.Option(20, help="Сколько лучших комбинаций вывести."),
+    by: str = typer.Option("", help="Разрез: time / symbol / timeframe (пусто — глобально)."),
+    symbol: str = typer.Option("", help="Фильтр по символу."),
+    timeframe: str = typer.Option("", help="Фильтр по таймфрейму."),
+    results_root: Path = typer.Option(Path("data/results"), help="Корень результатов."),
+) -> None:
+    """Вывести top-N параметров по метрике из результатов эксперимента."""
+    ranked = analyze_results(
+        experiment_results_path(results_root, experiment),
+        metric=metric,
+        top=top,
+        by=by or None,
+        symbol=symbol or None,
+        timeframe=timeframe or None,
+    )
+    typer.echo(str(ranked))
 
 
 if __name__ == "__main__":

@@ -72,7 +72,7 @@
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
 | [AN-1](AN-1.md) | Таблица parameter_performance_by_slice | done | EXP-4 |
-| [AN-2](AN-2.md) | Ранжирование лучших параметров по слайсу | todo | AN-1 |
+| [AN-2](AN-2.md) | Ранжирование лучших параметров по слайсу | done | AN-1 |
 | [AN-3](AN-3.md) | Stability score (robust, вектор) | todo | AN-1 |
 | [AN-4](AN-4.md) | Heatmap и плоты | todo | AN-1 |
 | [AN-5](AN-5.md) | Экспорт CSV/Parquet + ноутбук | todo | AN-1 |
