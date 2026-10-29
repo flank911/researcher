@@ -81,6 +81,25 @@ class SliceFeatures(FrozenModel):
 # Порядок колонок таблицы time_slice_features.
 TIME_SLICE_FEATURE_COLUMNS: tuple[str, ...] = tuple(SliceFeatures.model_fields)
 
+# Схема таблицы time_slice_features. Публичная: её нужно знать читателям, которым
+# требуется пустая таблица с правильными типами (RUN-3 — нет данных ни по одному
+# символу; RUN-5 — пустой join).
+TIME_SLICE_FEATURE_SCHEMA: dict[str, pl.DataType] = {
+    "symbol": pl.String(),
+    "timeframe": pl.String(),
+    "time_slice_id": pl.String(),
+    "market_return_pct": pl.Float64(),
+    "volatility": pl.Float64(),
+    "trend_strength": pl.Float64(),
+    "adx": pl.Float64(),
+    "funding_avg": pl.Float64(),
+    "oi_change_pct": pl.Float64(),
+    "ls_ratio_avg": pl.Float64(),
+    "volume_zscore": pl.Float64(),
+    "drawdown_from_ath": pl.Float64(),
+    "regime_label": pl.String(),
+}
+
 
 def classify_regime(
     *,
@@ -196,25 +215,12 @@ def _window(df: pl.DataFrame | None, start: datetime, end: datetime) -> pl.DataF
 
 
 def _table_schema() -> dict[str, pl.DataType]:
-    return {
-        "symbol": pl.String(),
-        "timeframe": pl.String(),
-        "time_slice_id": pl.String(),
-        "market_return_pct": pl.Float64(),
-        "volatility": pl.Float64(),
-        "trend_strength": pl.Float64(),
-        "adx": pl.Float64(),
-        "funding_avg": pl.Float64(),
-        "oi_change_pct": pl.Float64(),
-        "ls_ratio_avg": pl.Float64(),
-        "volume_zscore": pl.Float64(),
-        "drawdown_from_ath": pl.Float64(),
-        "regime_label": pl.String(),
-    }
+    return dict(TIME_SLICE_FEATURE_SCHEMA)
 
 
 __all__ = [
     "TIME_SLICE_FEATURE_COLUMNS",
+    "TIME_SLICE_FEATURE_SCHEMA",
     "RegimeLabel",
     "RegimeThresholds",
     "SliceFeatures",

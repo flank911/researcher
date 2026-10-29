@@ -14,6 +14,7 @@ import typer
 
 from trading_research import __version__
 from trading_research.cli.analyze_results import analyze_results, experiment_results_path
+from trading_research.cli.build_features import build_features_from_config
 from trading_research.cli.export_results import export_results
 from trading_research.cli.fetch_data import fetch_data
 from trading_research.cli.fetch_market_data import SeriesKind, fetch_market_data
@@ -93,6 +94,17 @@ def fetch_market_data_cmd(
     )
     for name, rows in written.items():
         typer.echo(f"wrote {rows} rows of {name} for {symbol} {timeframe} -> {data_root}")
+
+
+@app.command("build-features")
+def build_features_cmd(
+    config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+    features_root: Path = typer.Option(Path("data/features"), help="Корень для фич."),
+) -> None:
+    """Построить таблицу `time_slice_features` (фичи рыночного режима) по конфигу."""
+    out = build_features_from_config(config, data_root=data_root, features_root=features_root)
+    typer.echo(f"features -> {out}")
 
 
 @app.command("run-experiment")

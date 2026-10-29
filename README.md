@@ -43,7 +43,8 @@ src/trading_research/
   backtest/   engine, broker, portfolio, orders, position, fees, slippage, metrics
   experiments/config, orchestrator, grid/random/optuna search, time_splitters, runner, cache
   analytics/  queries, stability, correlations, reports, plots
-  cli/        main, fetch_data, fetch_market_data, run_experiment, analyze_results, build_dataset
+  cli/        main, fetch_data, fetch_market_data, build_features, run_experiment,
+              analyze_results, export_results, plot_heatmap
 notebooks/    исследовательские ноутбуки
 tests/        тесты
 tickets/      план работ (по эпикам E0..E6)
