@@ -34,6 +34,20 @@ execution:
   signal_lag: 1
   fill_on: next_open
 
+# RUN-4 — честный out-of-sample. Окна в днях: календарный месяц в timedelta
+# точно не выражается, поэтому единицу выбирает автор конфига, а не код.
+walk_forward:
+  train_days: 180      # ~6 месяцев обучения
+  test_days: 30        # ~1 месяц теста, сразу после train
+  step_days: 30
+  select_by: sharpe    # метрика отбора на train
+  anchored: false      # скользящее окно; true — expanding от начала
+
+# Untouched holdout: всё от этой даты и позже в research не попадает и
+# проверяется ровно один раз, в самом конце.
+holdout:
+  start: "2025-07-01"
+
 metrics:
   primary: stability_score
   secondary:

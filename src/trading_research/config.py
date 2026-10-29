@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from trading_research.backtest.metrics import Metrics
 from trading_research.domain import SCHEMA_VERSION, ExecutionModel, SliceMode, TimeSliceKind
+
+# Числовые метрики, пригодные для отбора на train (WF-2 отвергает булев ``reliable``).
+NUMERIC_METRICS: frozenset[str] = frozenset(f.name for f in fields(Metrics)) - {"reliable"}
 
 
 class StrictModel(BaseModel):
@@ -51,6 +56,53 @@ class OutputConfig(StrictModel):
     save_plots: bool = False
 
 
+class WalkForwardConfig(StrictModel):
+    """RUN-4 — параметры walk-forward (E5).
+
+    Окна заданы **в днях**, а не «в периодах», намеренно: ``generate_walk_forward_folds``
+    (WF-1) принимает ``timedelta``, а календарный месяц в ``timedelta`` точно не
+    выражается. Поле `train_span: 6` потребовало бы молча считать месяц за 30 дней —
+    то есть вернуть в конфиг скрытое допущение. В днях допущение выбирает автор
+    конфига, и оно видно в самом имени поля.
+    """
+
+    train_days: int = Field(gt=0)
+    test_days: int = Field(gt=0)
+    step_days: int = Field(gt=0)
+    select_by: str = "total_return_pct"
+    # True — train расширяется от начала (expanding); False — скользящее окно.
+    anchored: bool = False
+    warmup_bars: int = Field(default=0, ge=0)
+
+    @field_validator("select_by")
+    @classmethod
+    def _known_metric(cls, value: str) -> str:
+        if value not in NUMERIC_METRICS:
+            raise ValueError(
+                f"select_by must be a numeric Metrics field; "
+                f"got {value!r}, expected one of {sorted(NUMERIC_METRICS)}"
+            )
+        return value
+
+
+class HoldoutConfig(StrictModel):
+    """RUN-4 — политика untouched holdout (WF-3).
+
+    ``start`` — начало резерва: всё от этого момента и позже в research не попадает.
+    ``symbols`` — символы, целиком уходящие в резерв. Нужно хотя бы одно из двух,
+    иначе резерв пуст и holdout бессмыслен.
+    """
+
+    start: datetime | None = None
+    symbols: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _non_empty(self) -> HoldoutConfig:
+        if self.start is None and not self.symbols:
+            raise ValueError("holdout requires 'start' and/or non-empty 'symbols'")
+        return self
+
+
 class ExperimentConfig(StrictModel):
     """Полный конфиг эксперимента (см. пример configs/experiments/)."""
 
@@ -66,6 +118,10 @@ class ExperimentConfig(StrictModel):
     slice_mode: SliceMode = SliceMode.CONTINUOUS
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    # RUN-4: обе секции опциональны — `run-experiment` их не требует, а
+    # `walk-forward` требует только `walk_forward`.
+    walk_forward: WalkForwardConfig | None = None
+    holdout: HoldoutConfig | None = None
 
 
 def load_experiment_config(path: str | Path) -> ExperimentConfig:
