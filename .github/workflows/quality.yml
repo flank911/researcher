@@ -21,6 +21,9 @@ jobs:
   checks:
     name: ruff · mypy · pytest (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    # Полный прогон укладывается в пару минут. Лимит нужен, чтобы зависший тест
+    # падал быстро, а не висел до отмены следующим пушем (было: прогоны по 3 часа).
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
