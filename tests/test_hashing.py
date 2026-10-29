@@ -14,13 +14,22 @@ from pydantic import BaseModel
 
 from trading_research.hashing import canonical_json, git_commit_hash, stable_hash
 
+# Подпроцесс считает один хэш — секунды с запасом на холодный импорт. Лимит нужен,
+# чтобы зависший ребёнок падал по таймауту, а не держал весь прогон до лимита джобы
+# (INF-7). ``git_commit_hash`` в проде ограничен тем же способом.
+_SUBPROCESS_TIMEOUT_S = 60
+
 
 def _hash_in_subprocess(expr: str, runs: int = 3) -> list[str]:
     """Посчитать ``stable_hash(expr)`` в отдельных процессах (разный PYTHONHASHSEED)."""
     code = f"from trading_research.hashing import stable_hash;print(stable_hash({expr}))"
     return [
         subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=_SUBPROCESS_TIMEOUT_S,
         ).stdout.strip()
         for _ in range(runs)
     ]

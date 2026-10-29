@@ -24,17 +24,35 @@ permissions:
 jobs:
   review:
     name: Claude review
-    # Секрет может отсутствовать в форках — не роняем пайплайн.
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    # Ревью занимает ~2 минуты; лимит — чтобы зависший вызов не висел часами.
+    timeout-minutes: 15
+    env:
+      # Условие на форк выше отсутствие секрета **не** ловит: в самом репозитории
+      # его тоже может не быть (новый клон, секрет не настроен администратором).
+      # Тогда action падал на валидации окружения, и красный чек означал не
+      # «ревьюер нашёл проблему», а «ревьюер не настроен» — INF-7.
+      # ``secrets`` недоступен в job-level ``if``, поэтому проверка живёт в ``env``.
+      HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
+      - name: Предупредить, если ревьюер не настроен
+        if: env.HAS_API_KEY != 'true'
+        run: |
+          echo "::warning title=Claude review пропущено::\
+          Секрет ANTHROPIC_API_KEY не задан, автоматическое ревью не выполнялось. \
+          Настройка: Settings → Secrets and variables → Actions → ANTHROPIC_API_KEY \
+          (см. README, раздел «CI и код-ревью»)."
+
       - uses: actions/checkout@v4
+        if: env.HAS_API_KEY == 'true'
         with:
           fetch-depth: 0
 
       - name: Claude review
+        if: env.HAS_API_KEY == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
