@@ -20,6 +20,7 @@ from trading_research.cli.fetch_data import fetch_data
 from trading_research.cli.fetch_market_data import SeriesKind, fetch_market_data
 from trading_research.cli.plot_heatmap import plot_experiment_heatmap
 from trading_research.cli.run_experiment import run_experiment_from_config
+from trading_research.cli.walk_forward import walk_forward_from_config
 
 app = typer.Typer(
     add_completion=False,
@@ -126,6 +127,28 @@ def run_experiment_cmd(
         resume=resume,
     )
     typer.echo(f"results -> {out}")
+
+
+@app.command("walk-forward")
+def walk_forward_cmd(
+    config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+    results_root: Path = typer.Option(Path("data/results"), help="Корень для результатов."),
+) -> None:
+    """Прогнать walk-forward (честный OOS) и, если задан, holdout."""
+    results = walk_forward_from_config(config, data_root=data_root, results_root=results_root)
+    if not results:
+        typer.echo("no symbols produced walk-forward results")
+        return
+    for symbol, result in results.items():
+        typer.echo(f"\n{symbol}: {len(result.selections)} folds")
+        for sel in result.selections:
+            typer.echo(f"  fold {sel.fold}: {sel.params} train={sel.train_score:.4f}")
+        m = result.oos_metrics
+        typer.echo(
+            f"  OOS: return={m.total_return_pct:.2f}% dd={m.max_drawdown_pct:.2f}% "
+            f"trades={m.trades_count} reliable={m.reliable}"
+        )
 
 
 @app.command("analyze-results")
