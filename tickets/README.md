@@ -45,6 +45,7 @@
 | [INF-3](INF-3.md) | Канонический хэш и воспроизводимость | done | INF-1 |
 | [INF-4](INF-4.md) | CI-пайплайн для код-ревью merge requests | done | INF-1 |
 | [INF-5](INF-5.md) | Детерминизм канонизации (set/bytes/объекты) | done | INF-3 |
+| [INF-6](INF-6.md) | Совместимость с duckdb 2.0 | done | DATA-5, AN-1 |
 
 ### E1 — Data Core
 | ID | Заголовок | Статус | Зависимости |

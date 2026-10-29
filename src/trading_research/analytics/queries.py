@@ -183,7 +183,10 @@ def slice_param_performance(
             f"{col} AS axis_value, avg({metric}) AS {metric}_avg, count(*) AS n "
             f"FROM perf GROUP BY param_hash, {col} ORDER BY param_hash, {col}"
         )
-        return con.execute(query).pl()
+        # con.sql(), не con.execute(): см. INF-6 (duckdb 2.0 убрал .pl() с соединения).
+        # Аннотация обязательна — в стабах duckdb 2.0 .pl() объявлен как Any.
+        result: pl.DataFrame = con.sql(query).pl()
+        return result
     finally:
         con.close()
 
