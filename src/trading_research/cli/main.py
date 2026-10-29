@@ -10,9 +10,11 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import polars as pl
 import typer
 
 from trading_research import __version__
+from trading_research.cli.analyze_regimes import analyze_regimes, export_regimes
 from trading_research.cli.analyze_results import analyze_results, experiment_results_path
 from trading_research.cli.build_features import build_features_from_config
 from trading_research.cli.export_results import export_results
@@ -225,6 +227,50 @@ def export_results_cmd(
         top=top,
     )
     typer.echo(f"export -> {saved}")
+
+
+@app.command("analyze-regimes")
+def analyze_regimes_cmd(
+    experiment: str = typer.Option(..., help="Имя эксперимента (имя из конфига)."),
+    metric: str = typer.Option("total_return_pct", help="Метрика для корреляций."),
+    regime: str = typer.Option(
+        "", help="Режим (напр. bull_trend) — тогда выводится top-N параметров в нём."
+    ),
+    top: int = typer.Option(20, help="Top-N для режима."),
+    global_only: bool = typer.Option(
+        False, "--global", help="Одна строка общей корреляции вместо матрицы по параметрам."
+    ),
+    out: str = typer.Option("", help="Выгрузить результат в файл (CSV/Parquet)."),
+    fmt: str = typer.Option("csv", "--format", help="Формат выгрузки: csv/parquet."),
+    results_root: Path = typer.Option(Path("data/results"), help="Корень результатов."),
+    features_root: Path = typer.Option(Path("data/features"), help="Корень фич."),
+) -> None:
+    """Корреляции параметров с рыночным режимом (REG-3) по сохранённым таблицам."""
+    table = analyze_regimes(
+        results_root,
+        features_root,
+        experiment,
+        metric=metric,
+        regime=regime or None,
+        top=top,
+        by_param=not global_only,
+    )
+    # Матрица режима — 10 колонок; дефолтный вывод polars их обрезает, а смысл
+    # команды именно в том, чтобы показать все фичи сразу.
+    with pl.Config(tbl_cols=-1, tbl_width_chars=200):
+        typer.echo(str(table))
+    if out:
+        saved = export_regimes(
+            results_root,
+            features_root,
+            experiment,
+            out,
+            metric=metric,
+            regime=regime or None,
+            top=top,
+            fmt=fmt,
+        )
+        typer.echo(f"export -> {saved}")
 
 
 if __name__ == "__main__":

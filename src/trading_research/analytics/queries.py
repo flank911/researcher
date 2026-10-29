@@ -49,14 +49,26 @@ QUERYABLE_METRICS: frozenset[str] = frozenset(
     name for name, dt in _METRIC_TYPES.items() if dt != pl.Boolean()
 )
 
-# Слоты под фичи рыночного режима (E6/REG); пока null.
+# Слоты под фичи рыночного режима (E6/REG). В самой таблице AN-1 остаются null:
+# заполняет их join с ``time_slice_features`` на этапе анализа (REG-3 /
+# ``attach_regime_features``), а не прогон эксперимента.
+#
+# Список **обязан** совпадать с полями ``SliceFeatures`` (REG-2) за вычетом ключей
+# join. Специально не выводится из REG-2 импортом: аналитика сознательно не зависит
+# от слоя фич (см. docstring ``analytics/correlations.py``). Расхождение ловит тест
+# ``test_regime_slots_match_slice_features`` — до RUN-5 здесь не хватало ``adx``,
+# ``volume_zscore`` и ``drawdown_from_ath``, и они **молча** выпадали из
+# ``NUMERIC_REGIME_FEATURES``, то есть из корреляций по умолчанию.
 REGIME_SLOTS: tuple[str, ...] = (
     "market_return_pct",
     "volatility",
     "trend_strength",
+    "adx",
     "funding_avg",
     "oi_change_pct",
     "ls_ratio_avg",
+    "volume_zscore",
+    "drawdown_from_ath",
     "regime_label",
 )
 
