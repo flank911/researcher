@@ -67,9 +67,19 @@ def run_experiment_cmd(
     config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
     data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
     results_root: Path = typer.Option(Path("data/results"), help="Корень для результатов."),
+    workers: int = typer.Option(0, help="Процессов для сетки (0 — по числу ядер, 1 — без пула)."),
+    resume: bool = typer.Option(
+        True, "--resume/--no-resume", help="Продолжить прогон, пропуская готовые раны."
+    ),
 ) -> None:
     """Прогнать эксперимент по конфигу и записать пер-слайс метрики."""
-    out = run_experiment_from_config(config, data_root=data_root, results_root=results_root)
+    out = run_experiment_from_config(
+        config,
+        data_root=data_root,
+        results_root=results_root,
+        workers=workers or None,
+        resume=resume,
+    )
     typer.echo(f"results -> {out}")
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -13,7 +14,10 @@ import pytest
 
 from trading_research.domain import ExecutionModel, PositionSizeType, TimeSlice
 from trading_research.experiments.cache import RunLedger, RunSpec, build_run_specs
-from trading_research.experiments.parallel import execute_runs_parallel
+from trading_research.experiments.parallel import (
+    execute_run_groups_parallel,
+    execute_runs_parallel,
+)
 from trading_research.experiments.results_store import ResultsStore
 
 
@@ -72,6 +76,26 @@ def _save(root: Path, spec: RunSpec) -> None:
     store = ResultsStore(root)
     equity = pl.DataFrame({"open_time": [datetime(2024, 1, 1, tzinfo=UTC)], "equity": [10_000.0]})
     store.save_run(spec, metrics=None, trades=[], equity_curve=equity)
+
+
+def _touch_group(out_dir: Path, specs: Sequence[RunSpec]) -> None:
+    """Один «прогон» на группу: отмечает все её раны (как CONTINUOUS)."""
+    (out_dir / f"group-{specs[0].run_hash()}").write_text(str(len(specs)), encoding="utf-8")
+    for spec in specs:
+        _touch(out_dir, spec)
+
+
+def _fail_group(out_dir: Path, fail_first: frozenset[str], specs: Sequence[RunSpec]) -> None:
+    if specs[0].run_hash() in fail_first:
+        raise RuntimeError("group boom")
+    _touch_group(out_dir, specs)
+
+
+def _by_params(specs: list[RunSpec]) -> list[list[RunSpec]]:
+    groups: dict[str, list[RunSpec]] = {}
+    for spec in specs:
+        groups.setdefault(str(sorted(spec.params.items())), []).append(spec)
+    return list(groups.values())
 
 
 # --- dedupe -----------------------------------------------------------------
@@ -140,6 +164,91 @@ def test_concurrent_store_writes_no_races(tmp_path: Path) -> None:
         rec = store.get_run(spec.run_hash())
         assert rec is not None
         assert rec.strategy == "ma_cross"
+
+
+# --- группы (RUN-1): гранулярность CONTINUOUS -------------------------------
+
+
+def test_groups_run_once_per_combination(tmp_path: Path) -> None:
+    """Группа считается одним вызовом, но помечает все свои раны."""
+    ledger = RunLedger(tmp_path / "ledger")
+    out = tmp_path / "out"
+    out.mkdir()
+    specs = _specs(3, 4)  # 3 комбинации × 4 слайса = 12 ранов
+    groups = _by_params(specs)
+    assert len(groups) == 3
+
+    summary = execute_run_groups_parallel(groups, ledger, partial(_touch_group, out), max_workers=2)
+    assert summary.total == 12
+    assert summary.executed == 12  # счёт в ранах, не в группах
+    assert summary.skipped == 0
+    # Но вызовов воркера было ровно 3 — по одному на комбинацию.
+    assert len(list(out.glob("group-*"))) == 3
+    assert ledger.completed() == {s.run_hash() for s in specs}
+
+    second = execute_run_groups_parallel(groups, ledger, partial(_touch_group, out), max_workers=2)
+    assert second.executed == 0
+    assert second.skipped == 12
+
+
+def test_partial_group_is_recomputed(tmp_path: Path) -> None:
+    """Частично готовая группа считается заново — слайс нельзя досчитать отдельно."""
+    ledger = RunLedger(tmp_path / "ledger")
+    out = tmp_path / "out"
+    out.mkdir()
+    specs = _specs(2, 3)  # 2 группы по 3 рана
+    groups = _by_params(specs)
+
+    # Помечаем готовым только один ран первой группы.
+    ledger.mark_done(groups[0][0].run_hash())
+
+    summary = execute_run_groups_parallel(groups, ledger, partial(_touch_group, out), max_workers=1)
+    # Ни одна группа не пропущена: в первой готов лишь один ран, вторая не начата.
+    assert summary.skipped == 0
+    assert len(list(out.glob("group-*"))) == 2
+
+
+def test_group_failure_isolated_and_resumable(tmp_path: Path) -> None:
+    """Падение группы не рушит остальные и не помечает её раны готовыми."""
+    ledger = RunLedger(tmp_path / "ledger")
+    out = tmp_path / "out"
+    out.mkdir()
+    specs = _specs(3, 2)
+    groups = _by_params(specs)
+    doomed = groups[1]
+    doomed_hashes = {s.run_hash() for s in doomed}
+
+    first = execute_run_groups_parallel(
+        groups,
+        ledger,
+        partial(_fail_group, out, frozenset({doomed[0].run_hash()})),
+        max_workers=2,
+    )
+    assert first.failed == len(doomed)
+    assert set(first.failed_hashes) == doomed_hashes
+    assert not (doomed_hashes & ledger.completed())
+
+    resume = execute_run_groups_parallel(groups, ledger, partial(_touch_group, out), max_workers=2)
+    assert resume.executed == len(doomed)
+    assert set(resume.executed_hashes) == doomed_hashes
+    assert ledger.completed() == {s.run_hash() for s in specs}
+
+
+def test_workers_one_runs_inline_same_semantics(tmp_path: Path) -> None:
+    """``max_workers=1`` исполняет без пула, результат тот же."""
+    ledger = RunLedger(tmp_path / "ledger")
+    out = tmp_path / "out"
+    out.mkdir()
+    specs = _specs(2, 2)
+    groups = _by_params(specs)
+
+    summary = execute_run_groups_parallel(groups, ledger, partial(_touch_group, out), max_workers=1)
+    assert summary.executed == 4
+    assert summary.failed == 0
+    assert ledger.completed() == {s.run_hash() for s in specs}
+
+
+# --- speedup ----------------------------------------------------------------
 
 
 # --- speedup ----------------------------------------------------------------
