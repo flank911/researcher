@@ -28,11 +28,19 @@
 
 from __future__ import annotations
 
+import multiprocessing
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from trading_research.experiments.cache import RunLedger, RunSpec
+
+# Пул процессов создаётся только через spawn. На Linux дефолт — fork (до 3.14),
+# а форк процесса, в котором уже работал polars, насмерть вешает ребёнка: пул
+# потоков rayon в дочерний процесс не переносится, и первый же `collect()` виснет
+# в `LockLatch::wait_and_reset` навсегда. На macOS дефолт spawn, поэтому локально
+# это не воспроизводится — висит только CI.
+_MP_CONTEXT = multiprocessing.get_context("spawn")
 
 
 @dataclass(frozen=True)
@@ -69,7 +77,7 @@ def execute_runs_parallel(
     failed_hashes: list[str] = []
 
     if pending:
-        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=_MP_CONTEXT) as pool:
             future_to_spec = {pool.submit(compute, spec): spec for spec in pending}
             for future in as_completed(future_to_spec):
                 spec = future_to_spec[future]
@@ -151,7 +159,7 @@ def execute_run_groups_parallel(
                 continue
             _mark(group)
     elif pending:
-        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=_MP_CONTEXT) as pool:
             future_to_group = {pool.submit(compute_group, g): g for g in pending}
             for future in as_completed(future_to_group):
                 group = future_to_group[future]

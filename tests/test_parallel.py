@@ -15,6 +15,7 @@ import pytest
 from trading_research.domain import ExecutionModel, PositionSizeType, TimeSlice
 from trading_research.experiments.cache import RunLedger, RunSpec, build_run_specs
 from trading_research.experiments.parallel import (
+    _MP_CONTEXT,
     execute_run_groups_parallel,
     execute_runs_parallel,
 )
@@ -248,7 +249,17 @@ def test_workers_one_runs_inline_same_semantics(tmp_path: Path) -> None:
     assert ledger.completed() == {s.run_hash() for s in specs}
 
 
-# --- speedup ----------------------------------------------------------------
+# --- старт процессов --------------------------------------------------------
+
+
+def test_pool_never_forks() -> None:
+    """Пул не должен наследовать состояние родителя через fork.
+
+    На Linux fork — дефолт, и форк процесса, где уже работал polars, вешает
+    ребёнка навсегда (пул потоков rayon не переносится). Локально на macOS
+    дефолт spawn, поэтому регрессию видно только в CI — ловим её здесь.
+    """
+    assert _MP_CONTEXT.get_start_method() == "spawn"
 
 
 # --- speedup ----------------------------------------------------------------
@@ -256,15 +267,26 @@ def test_workers_one_runs_inline_same_semantics(tmp_path: Path) -> None:
 
 @pytest.mark.skipif((os.cpu_count() or 1) < 2, reason="нужно >= 2 ядер для ускорения")
 def test_parallel_speedup(tmp_path: Path) -> None:
-    ledger = RunLedger(tmp_path / "ledger")
+    """4 воркера заметно быстрее одного на той же работе.
+
+    Сравниваем с *измеренным* одним воркером, а не с арифметикой: пул spawn'ится
+    и в том, и в другом прогоне, так что старт процессов (импорт polars в ребёнке)
+    вычитается сам и не делает тест флапающим на холодном раннере.
+    """
     specs = _specs(8, 1)  # 8 ранов по 0.25с
     sleep_s = 0.25
-    serial_total = len(specs) * sleep_s  # 2.0с при последовательном исполнении
+    compute = partial(_sleep, sleep_s)
 
     t0 = time.perf_counter()
-    summary = execute_runs_parallel(specs, ledger, partial(_sleep, sleep_s), max_workers=4)
-    elapsed = time.perf_counter() - t0
+    serial = execute_runs_parallel(specs, RunLedger(tmp_path / "ledger-1"), compute, max_workers=1)
+    serial_elapsed = time.perf_counter() - t0
 
-    assert summary.executed == 8
-    # С 4 воркерами идеал ≈ 0.5с; с запасом на накладные требуем заметное ускорение.
-    assert elapsed < serial_total * 0.6
+    t0 = time.perf_counter()
+    parallel = execute_runs_parallel(
+        specs, RunLedger(tmp_path / "ledger-4"), compute, max_workers=4
+    )
+    parallel_elapsed = time.perf_counter() - t0
+
+    assert serial.executed == parallel.executed == 8
+    # Идеал — вчетверо; с запасом на накладные требуем заметное ускорение.
+    assert parallel_elapsed < serial_elapsed * 0.6
