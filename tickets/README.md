@@ -20,7 +20,16 @@
 ## MVP-граница
 
 `INF-1..3 → DATA-1..6 → BT-1..8 → EXP-1..6 → AN-1..4`.
-После MVP: E5 (walk-forward) → E6 (market regimes).
+После MVP: E5 (walk-forward) → E6 (market regimes) → E7 (первый реальный прогон).
+
+## Статус: E0–E6 закрыты
+
+Код платформы готов и покрыт тестами (303 теста), но **ни одного прогона на
+реальных данных не делалось**. E7 закрывает разрыв между «библиотека работает» и
+«исследование проведено». Главное, что вскрылось при подготовке E7: три закрытых
+тикета (`EXP-3` resume/dedupe, `EXP-4` ResultsStore, `EXP-5` параллелизм) и два
+эпика (`E5`, `E6`) существуют только как библиотеки — в CLI-пути они не подключены,
+см. [RUN-1](RUN-1.md), [RUN-4](RUN-4.md), [RUN-5](RUN-5.md).
 
 ## Легенда статусов
 
@@ -91,3 +100,15 @@
 | [REG-1](REG-1.md) | Доп. данные: funding/OI/LS ratio | done | DATA-2 |
 | [REG-2](REG-2.md) | Фичи режима + time_slice_features | done | REG-1, DATA-6 |
 | [REG-3](REG-3.md) | Корреляции параметры↔режим | done | REG-2, AN-1 |
+
+### E7 — First real research run
+| ID | Заголовок | Статус | Зависимости |
+|----|-----------|--------|-------------|
+| [RUN-1](RUN-1.md) | Resume/dedupe и параллелизм в CLI-прогоне | todo | EXP-3, EXP-4, EXP-5, EXP-6 |
+| [RUN-2](RUN-2.md) | CLI загрузки funding/OI/LS | todo | REG-1, EXP-6 |
+| [RUN-3](RUN-3.md) | CLI построения `time_slice_features` | todo | REG-2, RUN-2 |
+| [RUN-4](RUN-4.md) | CLI walk-forward и holdout + конфиг | todo | WF-2, WF-3, EXP-6 |
+| [RUN-5](RUN-5.md) | Режимные слоты AN-1 + CLI `analyze-regimes` | todo | REG-3, RUN-3 |
+| [RUN-6](RUN-6.md) | Мультитаймфрейм, актуальные конфиги, README | todo | EXP-6 |
+| [RUN-7](RUN-7.md) | Первое реальное исследование end-to-end | todo | RUN-1..6 |
+| [RUN-8](RUN-8.md) | Производительность walk-forward | todo | RUN-7 |
