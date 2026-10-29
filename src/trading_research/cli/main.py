@@ -16,6 +16,7 @@ from trading_research import __version__
 from trading_research.cli.analyze_results import analyze_results, experiment_results_path
 from trading_research.cli.export_results import export_results
 from trading_research.cli.fetch_data import fetch_data
+from trading_research.cli.fetch_market_data import SeriesKind, fetch_market_data
 from trading_research.cli.plot_heatmap import plot_experiment_heatmap
 from trading_research.cli.run_experiment import run_experiment_from_config
 
@@ -60,6 +61,38 @@ def fetch_data_cmd(
         data_root=data_root,
     )
     typer.echo(f"wrote {written} candles for {symbol} {timeframe} -> {data_root}")
+
+
+@app.command("fetch-market-data")
+def fetch_market_data_cmd(
+    symbol: str = typer.Option(..., help="Тикер, например BTCUSDT."),
+    timeframe: str = typer.Option(
+        ..., help="Интервал: ключ партиции и период агрегации для OI/LS."
+    ),
+    start: datetime = typer.Option(..., formats=["%Y-%m-%d"], help="Начало диапазона (UTC)."),
+    end: datetime = typer.Option(
+        ..., formats=["%Y-%m-%d"], help="Конец диапазона (UTC, эксклюзивно)."
+    ),
+    series: SeriesKind = typer.Option(
+        SeriesKind.ALL, help="Ряд: funding / open_interest / long_short_ratio / all."
+    ),
+    exchange: str = typer.Option("binance", help="Биржа (для пути хранения)."),
+    market: str = typer.Option("futures", help="Рынок (для пути хранения)."),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+) -> None:
+    """Загрузить funding / open interest / long-short ratio в Parquet-store."""
+    written = fetch_market_data(
+        exchange=exchange,
+        market=market,
+        symbol=symbol,
+        timeframe=timeframe,
+        start=start,
+        end=end,
+        series=series,
+        data_root=data_root,
+    )
+    for name, rows in written.items():
+        typer.echo(f"wrote {rows} rows of {name} for {symbol} {timeframe} -> {data_root}")
 
 
 @app.command("run-experiment")
