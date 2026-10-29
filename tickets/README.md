@@ -42,7 +42,7 @@
 | [DATA-1](DATA-1.md) | Клиент загрузки OHLCV (Binance futures) | done | INF-1 |
 | [DATA-2](DATA-2.md) | Parquet store (партиционирование) | done | DATA-1 |
 | [DATA-3](DATA-3.md) | Валидация данных | done | DATA-2 |
-| [DATA-4](DATA-4.md) | Каталог датасетов + dataset_hash | todo | DATA-2, INF-3 |
+| [DATA-4](DATA-4.md) | Каталог датасетов + dataset_hash | done | DATA-2, INF-3 |
 | [DATA-5](DATA-5.md) | DuckDB/Polars слой доступа (+warmup) | done | DATA-2 |
 | [DATA-6](DATA-6.md) | Генератор TimeSlice | done | INF-2 |
 
@@ -89,4 +89,4 @@
 |----|-----------|--------|-------------|
 | [REG-1](REG-1.md) | Доп. данные: funding/OI/LS ratio | done | DATA-2 |
 | [REG-2](REG-2.md) | Фичи режима + time_slice_features | done | REG-1, DATA-6 |
-| [REG-3](REG-3.md) | Корреляции параметры↔режим | todo | REG-2, AN-1 |
+| [REG-3](REG-3.md) | Корреляции параметры↔режим | done | REG-2, AN-1 |
