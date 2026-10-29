@@ -133,7 +133,11 @@ class DuckDBStore:
                 # Пустой источник с канонической схемой, чтобы SQL не падал.
                 source = f"({_empty_candles_sql()})"
             con.execute(f"CREATE VIEW candles AS SELECT * FROM {source}")
-            return con.execute(sql).pl()
+            # con.sql(), не con.execute(): в duckdb 2.0 метод .pl() остался только на
+            # DuckDBPyRelation, с соединения он убран (INF-6). Аннотация обязательна —
+            # в стабах duckdb 2.0 .pl() объявлен как Any.
+            result: pl.DataFrame = con.sql(sql).pl()
+            return result
         finally:
             con.close()
 
