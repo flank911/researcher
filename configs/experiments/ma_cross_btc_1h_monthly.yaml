@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 name: ma_cross_monthly_btc
 description: MVP — MA Cross stability by month on BTCUSDT 1h
 
@@ -7,9 +7,11 @@ data:
   market: futures
   symbols:
     - BTCUSDT
-  timeframe: 1h
+  # RUN-6: список, как и symbols. Прогон идёт по всем парам символ × таймфрейм.
+  timeframes:
+    - 1h
   start: "2021-01-01"
-  end: "2025-12-31"
+  end: "2026-10-01"
 
 time_slices:
   type: month
@@ -46,7 +48,7 @@ walk_forward:
 # Untouched holdout: всё от этой даты и позже в research не попадает и
 # проверяется ровно один раз, в самом конце.
 holdout:
-  start: "2025-07-01"
+  start: "2026-04-01"
 
 metrics:
   primary: stability_score

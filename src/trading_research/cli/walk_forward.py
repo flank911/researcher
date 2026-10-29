@@ -60,11 +60,14 @@ def walk_forward_from_config(
     *,
     data_root: str | Path,
     results_root: str | Path,
-) -> dict[str, WalkForwardResult]:
+) -> dict[tuple[str, str], WalkForwardResult]:
     """Прогнать walk-forward (и holdout, если задан) по конфигу.
 
-    Возвращает результат по каждому символу. Артефакты пишутся в
-    ``{results_root}/{experiment}/wf/{symbol}/``.
+    Возвращает результат по каждой паре ``(символ, таймфрейм)``. Артефакты пишутся в
+    ``{results_root}/{experiment}/wf/{symbol}/{timeframe}/``.
+
+    RUN-6: таймфрейм входит и в ключ результата, и в путь артефактов — иначе прогоны
+    одного символа на 1h и 4h перезаписывали бы друг друга.
 
     Raises:
         ValueError: нет секции ``walk_forward``; не получилось ни одного фолда;
@@ -85,44 +88,53 @@ def walk_forward_from_config(
     combos = expand_grid(cfg.params_grid)
     store = DuckDBStore(data_root)
     out_root = Path(results_root) / cfg.name / "wf"
-    results: dict[str, WalkForwardResult] = {}
+    results: dict[tuple[str, str], WalkForwardResult] = {}
 
     for symbol in cfg.data.symbols:
-        data = store.read_window(
-            exchange=cfg.data.exchange,
-            market=cfg.data.market,
-            symbol=symbol,
-            timeframe=cfg.data.timeframe,
-            start=cfg.data.start,
-            end=cfg.data.end,
-        )
-        if data.is_empty():
-            continue
+        for timeframe in cfg.data.timeframes:
+            data = store.read_window(
+                exchange=cfg.data.exchange,
+                market=cfg.data.market,
+                symbol=symbol,
+                timeframe=timeframe,
+                start=cfg.data.start,
+                end=cfg.data.end,
+            )
+            if data.is_empty():
+                continue
 
-        research = split.research_data(data, symbol=symbol) if split else data
-        if split is not None:
-            # Страховка уровня кода: резерв действительно отрезан (WF-3).
-            assert_research_only(research, split, symbol=symbol)
-        if research.is_empty():
-            # Символ целиком зарезервирован — на research его нет.
-            continue
+            research = split.research_data(data, symbol=symbol) if split else data
+            if split is not None:
+                # Страховка уровня кода: резерв действительно отрезан (WF-3).
+                assert_research_only(research, split, symbol=symbol)
+            if research.is_empty():
+                # Символ целиком зарезервирован — на research его нет.
+                continue
 
-        folds = build_folds(cfg, research_end)
-        result = run_walk_forward(
-            research,
-            strategy,
-            combos,
-            folds,
-            cfg.execution,
-            cfg.data.timeframe,
-            select_by=wf.select_by,
-        )
-        results[symbol] = result
+            folds = build_folds(cfg, research_end)
+            result = run_walk_forward(
+                research,
+                strategy,
+                combos,
+                folds,
+                cfg.execution,
+                timeframe,
+                select_by=wf.select_by,
+            )
+            results[symbol, timeframe] = result
 
-        symbol_dir = out_root / symbol
-        _save_oos(result, symbol_dir)
-        if split is not None:
-            _run_holdout(cfg, split, data, symbol=symbol, result=result, out_dir=symbol_dir)
+            out_dir = out_root / symbol / timeframe
+            _save_oos(result, out_dir)
+            if split is not None:
+                _run_holdout(
+                    cfg,
+                    split,
+                    data,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    result=result,
+                    out_dir=out_dir,
+                )
 
     return results
 
@@ -197,6 +209,7 @@ def _run_holdout(
     data: pl.DataFrame,
     *,
     symbol: str,
+    timeframe: str,
     result: WalkForwardResult,
     out_dir: Path,
 ) -> None:
@@ -215,7 +228,7 @@ def _run_holdout(
         get_strategy(cfg.strategy.name),
         params,
         cfg.execution,
-        cfg.data.timeframe,
+        timeframe,
     )
     research_raw = getattr(result.oos_metrics, metric)
     report = build_holdout_report(
@@ -228,9 +241,9 @@ def _run_holdout(
     save_holdout_report(report, out_dir / HOLDOUT_REPORT_FILE)
 
 
-def wf_dir(results_root: str | Path, experiment: str, symbol: str) -> Path:
-    """Каталог артефактов walk-forward для символа (для читателей и тестов)."""
-    return Path(results_root) / experiment / "wf" / symbol
+def wf_dir(results_root: str | Path, experiment: str, symbol: str, timeframe: str) -> Path:
+    """Каталог артефактов walk-forward для пары символ × таймфрейм."""
+    return Path(results_root) / experiment / "wf" / symbol / timeframe
 
 
 __all__ = [

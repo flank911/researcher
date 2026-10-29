@@ -64,13 +64,13 @@ def _write_config(path: Path) -> None:
     path.write_text(
         textwrap.dedent(
             """
-            schema_version: 1
+            schema_version: 2
             name: smoke_ma_cross
             data:
               exchange: binance
               market: futures
               symbols: [BTCUSDT]
-              timeframe: 1h
+              timeframes: [1h]
               start: "2024-01-01"
               end: "2024-03-01"
             time_slices:

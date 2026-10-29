@@ -23,7 +23,7 @@ from pathlib import Path
 
 import polars as pl
 
-from trading_research.cli.run_experiment import generate_slices_for
+from trading_research.cli.run_experiment import slices_by_timeframe
 from trading_research.config import load_experiment_config
 from trading_research.data.storage.duckdb_store import DuckDBStore
 from trading_research.data.storage.parquet_store import (
@@ -54,8 +54,8 @@ def build_features_from_config(
     Повторный запуск перезаписывает файл целиком (идемпотентно).
     """
     cfg = load_experiment_config(config_path)
-    slices = generate_slices_for(cfg)
-    if not slices:
+    all_slices = slices_by_timeframe(cfg)
+    if not any(all_slices.values()):
         raise ValueError(
             "config produced no time slices; check data range and time_slices.min_bars"
         )
@@ -65,33 +65,37 @@ def build_features_from_config(
     frames: list[pl.DataFrame] = []
 
     for symbol in cfg.data.symbols:
-        candles = candle_store.read_window(
-            exchange=cfg.data.exchange,
-            market=cfg.data.market,
-            symbol=symbol,
-            timeframe=cfg.data.timeframe,
-            start=cfg.data.start,
-            end=cfg.data.end,
-        )
-        if candles.is_empty():
-            continue
-        keys = {
-            "exchange": cfg.data.exchange,
-            "market": cfg.data.market,
-            "symbol": symbol,
-            "timeframe": cfg.data.timeframe,
-        }
-        frames.append(
-            build_time_slice_features(
-                candles,
-                slices,
+        for timeframe in cfg.data.timeframes:
+            slices = all_slices[timeframe]
+            if not slices:
+                continue
+            candles = candle_store.read_window(
+                exchange=cfg.data.exchange,
+                market=cfg.data.market,
                 symbol=symbol,
-                timeframe=cfg.data.timeframe,
-                funding=read_series_or_none(series_store, FUNDING, **keys),
-                oi=read_series_or_none(series_store, OPEN_INTEREST, **keys),
-                ls=read_series_or_none(series_store, LONG_SHORT_RATIO, **keys),
+                timeframe=timeframe,
+                start=cfg.data.start,
+                end=cfg.data.end,
             )
-        )
+            if candles.is_empty():
+                continue
+            keys = {
+                "exchange": cfg.data.exchange,
+                "market": cfg.data.market,
+                "symbol": symbol,
+                "timeframe": timeframe,
+            }
+            frames.append(
+                build_time_slice_features(
+                    candles,
+                    slices,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    funding=read_series_or_none(series_store, FUNDING, **keys),
+                    oi=read_series_or_none(series_store, OPEN_INTEREST, **keys),
+                    ls=read_series_or_none(series_store, LONG_SHORT_RATIO, **keys),
+                )
+            )
 
     table = (
         pl.concat(frames, how="vertical").select(TIME_SLICE_FEATURE_COLUMNS)

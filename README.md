@@ -37,18 +37,23 @@ Python 3.11+ · Polars · DuckDB · Parquet · SQLite · pydantic · Typer (CLI)
 configs/      YAML-конфиги экспериментов и источников данных
 data/         raw / processed / features / results (вне git)
 src/trading_research/
-  data/       ingestion, storage, catalog, dataset_ref, validators
-  features/   indicators, market_regime, funding/oi/ls features
-  strategies/ base, ma_cross, ...
-  backtest/   engine, broker, portfolio, orders, position, fees, slippage, metrics
-  experiments/config, orchestrator, grid/random/optuna search, time_splitters, runner, cache
-  analytics/  queries, stability, correlations, reports, plots
-  cli/        main, fetch_data, fetch_market_data, build_features, run_experiment,
-              walk_forward, analyze_results, analyze_regimes, export_results,
-              plot_heatmap
+  config.py   конфиг эксперимента (pydantic) + загрузчик YAML
+  domain.py   доменные типы (TimeSlice, ExecutionModel, SliceMode)
+  hashing.py  канонический хэш и воспроизводимость
+  data/       ingestion/, storage/, catalog, schema, validators
+  features/   indicators, market_regime, funding/oi/ls_ratio features
+  strategies/ base, ma_cross
+  backtest/   engine, portfolio, position, orders, risk, fees, slippage,
+              sizing, funding, metrics
+  experiments/orchestrator, runner, grid/random search, time_splitters,
+              cache, parallel, results_store, walk_forward, holdout
+  analytics/  queries, stability, correlations, plots
+  cli/        main, fetch_data, fetch_market_data, build_features,
+              run_experiment, walk_forward, analyze_results, analyze_regimes,
+              export_results, plot_heatmap
 notebooks/    исследовательские ноутбуки
 tests/        тесты
-tickets/      план работ (по эпикам E0..E6)
+tickets/      план работ (по эпикам E0..E7)
 ```
 
 ## Установка (dev)

@@ -101,8 +101,8 @@ def run_experiment_from_config(
 
     cfg = load_experiment_config(config_path)
     combos = expand_grid(cfg.params_grid)
-    slices = generate_slices_for(cfg)
-    if not slices:
+    all_slices = slices_by_timeframe(cfg)
+    if not any(all_slices.values()):
         raise ValueError(
             "config produced no time slices; check data range and time_slices.min_bars"
         )
@@ -117,61 +117,90 @@ def run_experiment_from_config(
     data_store = DuckDBStore(data_root)
 
     for symbol in cfg.data.symbols:
-        candles = data_store.read_window(
-            exchange=cfg.data.exchange,
-            market=cfg.data.market,
-            symbol=symbol,
-            timeframe=cfg.data.timeframe,
-            start=cfg.data.start,
-            end=cfg.data.end,
-        )
-        specs = build_run_specs(
-            strategy=cfg.strategy.name,
-            symbol=symbol,
-            timeframe=cfg.data.timeframe,
-            dataset_hash=dataset_hash(candles),
-            execution=cfg.execution,
-            param_combos=combos,
-            slices=slices,
-            git_commit=commit,
-        )
-        ctx = WorkerContext(
-            data_root=Path(data_root),
-            store_root=store_root,
-            strategy_name=cfg.strategy.name,
-            exchange=cfg.data.exchange,
-            market=cfg.data.market,
-            timeframe=cfg.data.timeframe,
-            start=cfg.data.start,
-            end=cfg.data.end,
-            slices=tuple(slices),
-            mode=cfg.slice_mode,
-            min_trades=DEFAULT_MIN_TRADES,
-            save_trades=cfg.output.save_trades,
-            save_equity=cfg.output.save_equity_curve,
-        )
-        execute_run_groups_parallel(
-            group_specs_by_params(specs),
-            ledger,
-            partial(compute_group, ctx=ctx),
-            max_workers=workers,
-        )
+        for timeframe in cfg.data.timeframes:
+            slices = all_slices[timeframe]
+            if not slices:
+                continue
+            candles = data_store.read_window(
+                exchange=cfg.data.exchange,
+                market=cfg.data.market,
+                symbol=symbol,
+                timeframe=timeframe,
+                start=cfg.data.start,
+                end=cfg.data.end,
+            )
+            specs = build_run_specs(
+                strategy=cfg.strategy.name,
+                symbol=symbol,
+                timeframe=timeframe,
+                dataset_hash=dataset_hash(candles),
+                execution=cfg.execution,
+                param_combos=combos,
+                slices=slices,
+                git_commit=commit,
+            )
+            ctx = WorkerContext(
+                data_root=Path(data_root),
+                store_root=store_root,
+                strategy_name=cfg.strategy.name,
+                exchange=cfg.data.exchange,
+                market=cfg.data.market,
+                timeframe=timeframe,
+                start=cfg.data.start,
+                end=cfg.data.end,
+                slices=tuple(slices),
+                mode=cfg.slice_mode,
+                min_trades=DEFAULT_MIN_TRADES,
+                save_trades=cfg.output.save_trades,
+                save_equity=cfg.output.save_equity_curve,
+            )
+            execute_run_groups_parallel(
+                group_specs_by_params(specs),
+                ledger,
+                partial(compute_group, ctx=ctx),
+                max_workers=workers,
+            )
 
-    table = performance_from_store(store, slices, experiment_id=cfg.name)
+    table = performance_from_store(store, union_slices(all_slices), experiment_id=cfg.name)
     return save_performance_table(table, store_root / RESULTS_FILE)
 
 
-def generate_slices_for(cfg: Any) -> list[TimeSlice]:
-    """Временные окна конфига (вынесено, чтобы CLI и воркер считали их одинаково)."""
+def generate_slices_for(cfg: Any, timeframe: str) -> list[TimeSlice]:
+    """Временные окна конфига для одного таймфрейма.
+
+    Таймфрейм — обязательный аргумент, а не поле конфига: ``min_bars`` считается в
+    барах, поэтому один и тот же календарный месяц проходит фильтр на 1h и может
+    не пройти на 4h. Один список окон «на конфиг» молча дал бы неверную нарезку
+    для части таймфреймов (RUN-6).
+    """
     from trading_research.experiments.time_splitters import generate_time_slices
 
     return generate_time_slices(
         cfg.time_slices.type,
         cfg.data.start,
         cfg.data.end,
-        timeframe=cfg.data.timeframe,
+        timeframe=timeframe,
         min_bars=cfg.time_slices.min_bars,
     )
+
+
+def slices_by_timeframe(cfg: Any) -> dict[str, list[TimeSlice]]:
+    """Окна по каждому таймфрейму конфига."""
+    return {tf: generate_slices_for(cfg, tf) for tf in cfg.data.timeframes}
+
+
+def union_slices(by_timeframe: dict[str, list[TimeSlice]]) -> list[TimeSlice]:
+    """Объединение окон всех таймфреймов, без дублей по ``id``.
+
+    ``performance_from_store`` сопоставляет раны со окнами по ``slice_id``, а границы
+    окна от таймфрейма не зависят (меняется только то, прошло ли окно фильтр
+    ``min_bars``). Поэтому объединения достаточно, и оно покрывает раны всех пар.
+    """
+    merged: dict[str, TimeSlice] = {}
+    for slices in by_timeframe.values():
+        for sl in slices:
+            merged.setdefault(sl.id, sl)
+    return list(merged.values())
 
 
 def group_specs_by_params(specs: list[RunSpec]) -> list[list[RunSpec]]:
