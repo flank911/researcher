@@ -26,7 +26,15 @@ def _canonicalize(obj: Any) -> Any:
     - float -> нормализованное представление (убирает -0.0 и шум последних разрядов);
     - datetime/date -> ISO-строка;
     - Enum -> его value;
+    - set/frozenset -> отсортированный список (порядок итерации множества зависит
+      от ``PYTHONHASHSEED``, см. INF-5);
+    - bytes -> hex-строка;
     - объекты с ``model_dump`` (pydantic) / ``__dict__`` -> dict.
+
+    Raises:
+        TypeError: тип не канонизируется. Намеренно громко: ``str(obj)`` для
+            неизвестного объекта подставил бы дефолтный ``__repr__`` с адресом в
+            памяти, то есть тихо нестабильный хэш (INF-5).
     """
     if obj is None or isinstance(obj, (bool, int, str)):
         return obj
@@ -39,10 +47,18 @@ def _canonicalize(obj: Any) -> Any:
         return 0.0 if normalized == 0.0 else normalized
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
+    # Достижимо только для не-строковых энумов: StrEnum/IntEnum ловит проверка на
+    # str/int выше (их значение сериализуется корректно и без этой ветки).
     if isinstance(obj, Enum):
         return _canonicalize(obj.value)
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.hex()
     if isinstance(obj, Mapping):
         return {str(k): _canonicalize(obj[k]) for k in sorted(obj, key=str)}
+    # Сортируем уже канонизированные элементы по repr: он детерминирован для
+    # JSON-примитивов и даёт полный порядок на разнотипном множестве.
+    if isinstance(obj, (set, frozenset)):
+        return sorted((_canonicalize(v) for v in obj), key=repr)
     if isinstance(obj, (list, tuple)) or (
         isinstance(obj, Sequence) and not isinstance(obj, (str, bytes))
     ):
@@ -53,7 +69,10 @@ def _canonicalize(obj: Any) -> Any:
         return _canonicalize(model_dump(mode="python"))
     if hasattr(obj, "__dict__"):
         return _canonicalize(vars(obj))
-    return str(obj)
+    raise TypeError(
+        f"cannot canonicalize {type(obj).__name__!r} deterministically; "
+        "convert it to a primitive, mapping, sequence or pydantic model before hashing"
+    )
 
 
 def canonical_json(obj: Any) -> str:

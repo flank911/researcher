@@ -35,6 +35,7 @@
 | [INF-2](INF-2.md) | Доменные типы и конфиги (pydantic) | done | INF-1 |
 | [INF-3](INF-3.md) | Канонический хэш и воспроизводимость | done | INF-1 |
 | [INF-4](INF-4.md) | CI-пайплайн для код-ревью merge requests | done | INF-1 |
+| [INF-5](INF-5.md) | Детерминизм канонизации (set/bytes/объекты) | done | INF-3 |
 
 ### E1 — Data Core
 | ID | Заголовок | Статус | Зависимости |
