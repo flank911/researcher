@@ -106,7 +106,7 @@
 | ID | Заголовок | Статус | Зависимости |
 |----|-----------|--------|-------------|
 | [RUN-1](RUN-1.md) | Resume/dedupe и параллелизм в CLI-прогоне | done | EXP-3, EXP-4, EXP-5, EXP-6 |
-| [RUN-2](RUN-2.md) | CLI загрузки funding/OI/LS | todo | REG-1, EXP-6 |
+| [RUN-2](RUN-2.md) | CLI загрузки funding/OI/LS | done | REG-1, EXP-6 |
 | [RUN-3](RUN-3.md) | CLI построения `time_slice_features` | todo | REG-2, RUN-2 |
 | [RUN-4](RUN-4.md) | CLI walk-forward и holdout + конфиг | todo | WF-2, WF-3, EXP-6 |
 | [RUN-5](RUN-5.md) | Режимные слоты AN-1 + CLI `analyze-regimes` | todo | REG-3, RUN-3 |
