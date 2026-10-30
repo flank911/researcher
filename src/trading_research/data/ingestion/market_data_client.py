@@ -9,7 +9,20 @@ Funding rate, open interest и long/short account ratio — по образцу 
 - open interest: ``/futures/data/openInterestHist`` (нужен ``period``)
 - long/short:    ``/futures/data/globalLongShortAccountRatio`` (нужен ``period``)
 
-Пагинация — по времени (курсор сдвигается за последний полученный таймстамп).
+Пагинация зависит от эндпоинта, и это не деталь реализации, а REG-5:
+
+- ``/fapi/v1/fundingRate`` отдаёт точки **от** ``startTime`` вперёд, поэтому для
+  него работает курсор (сдвиг за последний полученный таймстамп);
+- ``/futures/data/*`` отдаёт **хвост** запрошенного окна — последние ``limit``
+  точек перед ``endTime``. На таком ответе курсор после первого батча оказывается
+  за ``endTime``, цикл выходит, и начало диапазона просто не загружается. Поэтому
+  эти ряды грузятся нарезкой диапазона на окна по ``limit`` периодов: в окне ровно
+  ``limit`` точек, значит «хвост» окна и есть всё окно — от направления ответа
+  такая загрузка не зависит.
+
+Границы окна всюду полуинтервал ``[start, end)`` — как в ``fetch-data``,
+``DuckDBStore.read_window`` и конфиге эксперимента. Binance трактует ``endTime``
+включительно, поэтому в запрос уходит ``end - 1 ms``.
 """
 
 from __future__ import annotations
@@ -41,11 +54,42 @@ LONG_SHORT_PATH = "/futures/data/globalLongShortAccountRatio"
 MAX_LIMIT_FUNDING = 1000
 MAX_LIMIT_DATA = 500
 
+# Интервалы агрегации, которые Binance принимает в ``period`` для /futures/data/*,
+# и их длительность. Длительность нужна не для валидации, а для нарезки диапазона
+# на окна: ширина окна — ``limit × period``. У funding своего периода нет
+# (расписание выплат задаёт биржа), поэтому его здесь и нет.
+PERIOD_MS: dict[str, int] = {
+    "5m": 5 * 60_000,
+    "15m": 15 * 60_000,
+    "30m": 30 * 60_000,
+    "1h": 60 * 60_000,
+    "2h": 2 * 60 * 60_000,
+    "4h": 4 * 60 * 60_000,
+    "6h": 6 * 60 * 60_000,
+    "12h": 12 * 60 * 60_000,
+    "1d": 24 * 60 * 60_000,
+}
+
 
 def _to_ms(dt: datetime) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return int(dt.timestamp() * 1000)
+
+
+def _period_ms(period: str) -> int:
+    """Длительность интервала агрегации в миллисекундах.
+
+    Raises:
+        ValueError: период не из набора, который поддерживает Binance — по нему
+            не посчитать ширину окна, и запрос уйдёт в сеть заведомо неверным.
+    """
+    try:
+        return PERIOD_MS[period]
+    except KeyError:
+        raise ValueError(
+            f"unsupported period {period!r}; supported: {', '.join(PERIOD_MS)}"
+        ) from None
 
 
 class BinanceMarketDataClient:
@@ -72,7 +116,7 @@ class BinanceMarketDataClient:
         self, symbol: str, start: datetime, end: datetime, *, limit: int = MAX_LIMIT_FUNDING
     ) -> pl.DataFrame:
         """Funding rate за ``[start, end)`` → ``open_time``, ``funding_rate``."""
-        rows = self._paginate(
+        rows = self._paginate_forward(
             FUNDING_PATH, {"symbol": symbol.upper()}, "fundingTime", start, end, limit
         )
         if not rows:
@@ -95,13 +139,13 @@ class BinanceMarketDataClient:
         limit: int = MAX_LIMIT_DATA,
     ) -> pl.DataFrame:
         """Open interest за ``[start, end)`` → ``open_time``, ``open_interest(_value)``."""
-        rows = self._paginate(
+        rows = self._paginate_windows(
             OPEN_INTEREST_PATH,
             {"symbol": symbol.upper(), "period": period},
-            "timestamp",
             start,
             end,
             limit,
+            period,
         )
         if not rows:
             return pl.DataFrame(schema=OPEN_INTEREST_SCHEMA)
@@ -124,13 +168,13 @@ class BinanceMarketDataClient:
         limit: int = MAX_LIMIT_DATA,
     ) -> pl.DataFrame:
         """Long/short account ratio за ``[start, end)``."""
-        rows = self._paginate(
+        rows = self._paginate_windows(
             LONG_SHORT_PATH,
             {"symbol": symbol.upper(), "period": period},
-            "timestamp",
             start,
             end,
             limit,
+            period,
         )
         if not rows:
             return pl.DataFrame(schema=LONG_SHORT_RATIO_SCHEMA)
@@ -146,7 +190,7 @@ class BinanceMarketDataClient:
 
     # --- internals ----------------------------------------------------------
 
-    def _paginate(
+    def _paginate_forward(
         self,
         path: str,
         base_params: Mapping[str, str],
@@ -155,34 +199,91 @@ class BinanceMarketDataClient:
         end: datetime,
         limit: int,
     ) -> list[dict[str, Any]]:
-        if end <= start:
-            raise ValueError(f"end must be after start: {start} >= {end}")
-        start_ms, end_ms = _to_ms(start), _to_ms(end)
+        """Курсорная пагинация для эндпоинтов, отдающих точки **от** ``startTime``.
+
+        Применима только к ``/fapi/v1/fundingRate``: на хвостовом ответе
+        ``/futures/data/*`` курсор перескакивает за ``endTime`` после первого же
+        батча и теряет начало диапазона (REG-5) — для них есть
+        ``_paginate_windows``.
+        """
+        start_ms, end_ms = self._window_ms(start, end)
         url = f"{self._base_url}{path}"
 
         rows: list[dict[str, Any]] = []
         cursor = start_ms
         while cursor < end_ms:
-            params = {
-                **base_params,
-                "startTime": str(cursor),
-                "endTime": str(end_ms),
-                "limit": str(limit),
-            }
-            batch = self._request_with_retry(url, params)
-            if not isinstance(batch, list):
-                raise BinanceAPIError(200, f"unexpected payload type: {type(batch).__name__}")
+            batch = self._fetch_batch(url, base_params, cursor, end_ms, limit)
             if not batch:
                 break
             rows.extend(batch)
-            last_time = int(batch[-1][time_key])
-            next_cursor = last_time + 1  # сдвиг за последний таймстамп
+            next_cursor = int(batch[-1][time_key]) + 1  # сдвиг за последний таймстамп
             if next_cursor <= cursor:
                 break
             cursor = next_cursor
             if len(batch) < limit:
                 break
         return rows
+
+    def _paginate_windows(
+        self,
+        path: str,
+        base_params: Mapping[str, str],
+        start: datetime,
+        end: datetime,
+        limit: int,
+        period: str,
+    ) -> list[dict[str, Any]]:
+        """Нарезка диапазона на окна по ``limit`` периодов — для ``/futures/data/*``.
+
+        Эти эндпоинты отдают хвост запрошенного окна, поэтому направление ответа
+        важно только до тех пор, пока окно шире ``limit`` точек. Делаем окна ровно
+        в ``limit`` периодов — и хвост окна совпадает со всем окном.
+
+        Пустой ответ цикл **не** прерывает: дыра в середине диапазона (данных за
+        это окно у биржи нет) не должна отменять загрузку остальных окон.
+        """
+        start_ms, end_ms = self._window_ms(start, end)
+        span_ms = _period_ms(period) * limit
+        url = f"{self._base_url}{path}"
+
+        rows: list[dict[str, Any]] = []
+        window_start = start_ms
+        while window_start < end_ms:
+            window_end = min(window_start + span_ms, end_ms)
+            rows.extend(self._fetch_batch(url, base_params, window_start, window_end, limit))
+            window_start = window_end
+        return rows
+
+    @staticmethod
+    def _window_ms(start: datetime, end: datetime) -> tuple[int, int]:
+        if end <= start:
+            raise ValueError(f"end must be after start: {start} >= {end}")
+        return _to_ms(start), _to_ms(end)
+
+    def _fetch_batch(
+        self,
+        url: str,
+        base_params: Mapping[str, str],
+        start_ms: int,
+        end_ms: int,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Один запрос за окно ``[start_ms, end_ms)``.
+
+        ``endTime`` у Binance включителен, поэтому в запрос уходит ``end_ms - 1``:
+        иначе точка ровно на правой границе попадает и в это окно, и в следующее,
+        а контракт метода — полуинтервал.
+        """
+        params = {
+            **base_params,
+            "startTime": str(start_ms),
+            "endTime": str(end_ms - 1),
+            "limit": str(limit),
+        }
+        batch = self._request_with_retry(url, params)
+        if not isinstance(batch, list):
+            raise BinanceAPIError(200, f"unexpected payload type: {type(batch).__name__}")
+        return batch
 
     def _request_with_retry(self, url: str, params: Mapping[str, str]) -> Any:
         last_error: Exception | None = None
@@ -220,4 +321,4 @@ class BinanceMarketDataClient:
         )
 
 
-__all__ = ["BinanceMarketDataClient"]
+__all__ = ["PERIOD_MS", "BinanceMarketDataClient"]

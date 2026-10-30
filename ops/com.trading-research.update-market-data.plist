@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  OPS-1 — сбор рыночных рядов каждые 6 часов.
+
+  StartInterval, а не StartCalendarInterval: на ноутбуке календарное время можно
+  проспать, а интервальную задачу launchd запускает при пробуждении. Шесть часов
+  при окне биржи в 30 дней — большой запас: чтобы потерять данные, расписание
+  должно молчать месяц, и ровно это видно в логе и в `launchctl list`.
+
+  Путь к репозиторию прописан явно — поправьте, если репозиторий переедет.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.trading-research.update-market-data</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/flank911/PycharmProjects/researcher/ops/update-market-data.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>WorkingDirectory</key>
+  <string>/Users/flank911/PycharmProjects/researcher</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/flank911/PycharmProjects/researcher/data/logs/launchd.err</string>
+  <key>StandardOutPath</key>
+  <string>/Users/flank911/PycharmProjects/researcher/data/logs/launchd.out</string>
+</dict>
+</plist>

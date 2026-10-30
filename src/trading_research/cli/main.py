@@ -19,9 +19,20 @@ from trading_research.cli.analyze_results import analyze_results, experiment_res
 from trading_research.cli.build_features import build_features_from_config
 from trading_research.cli.export_results import export_results
 from trading_research.cli.fetch_data import fetch_data
-from trading_research.cli.fetch_market_data import SeriesKind, fetch_market_data
+from trading_research.cli.fetch_market_data import (
+    CoverageStatus,
+    SeriesKind,
+    describe_coverage,
+    fetch_market_data,
+)
 from trading_research.cli.plot_heatmap import plot_experiment_heatmap
 from trading_research.cli.run_experiment import run_experiment_from_config
+from trading_research.cli.update_market_data import (
+    describe_total,
+    describe_update,
+    has_defects,
+    update_market_data_from_config,
+)
 from trading_research.cli.walk_forward import walk_forward_from_config
 
 app = typer.Typer(
@@ -95,8 +106,35 @@ def fetch_market_data_cmd(
         series=series,
         data_root=data_root,
     )
-    for name, rows in written.items():
-        typer.echo(f"wrote {rows} rows of {name} for {symbol} {timeframe} -> {data_root}")
+    for name, coverage in written.items():
+        typer.echo(describe_coverage(name, symbol, timeframe, coverage))
+    typer.echo(f"-> {data_root}")
+
+    # Неполное покрытие — не успех: молчаливый код 0 здесь и сделал REG-5
+    # незаметным на целом прогоне. Данные при этом записаны, см. вывод выше.
+    if any(c.status is CoverageStatus.INCOMPLETE for c in written.values()):
+        raise typer.Exit(code=1)
+
+
+@app.command("update-market-data")
+def update_market_data_cmd(
+    config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
+    series: SeriesKind = typer.Option(
+        SeriesKind.ALL, help="Ряд: funding / open_interest / long_short_ratio / all."
+    ),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+) -> None:
+    """Догрузить рыночные ряды от последней сохранённой точки (для расписания)."""
+    updates = update_market_data_from_config(config, data_root=data_root, series=series)
+    for update in updates:
+        typer.echo(describe_update(update))
+    typer.echo(describe_total(updates))
+
+    # Пропуск или неполное покрытие не должны выглядеть успешным прогоном
+    # расписания: иначе провал сбора обнаружится через месяц, когда окно
+    # retention уже съело историю.
+    if has_defects(updates):
+        raise typer.Exit(code=1)
 
 
 @app.command("build-features")
