@@ -29,14 +29,15 @@ ExperimentRun = Strategy + StrategyParams + Symbol + Timeframe
 
 ## Состояние
 
-Платформа счётно готова и проверена на реальной истории: 493 теста, `ruff`, `mypy`
+Платформа счётно готова и проверена на реальной истории: 519 тестов, `ruff`, `mypy`
 зелёные. Первое исследование проведено — BTCUSDT / ETHUSDT / SOLUSDT × 1h / 4h,
 2022-01-01 … 2026-10-01, отчёт в
 [`notebooks/004_first_research.ipynb`](notebooks/004_first_research.ipynb).
 
 В `data/` лежит 156 060 свечей и 31 902 строки funding за весь диапазон. Свечи и
-funding можно наполнять дальше уже сейчас — запись идемпотентна, валидатор на этой
-истории не нашёл дефектов. Open interest и long/short ratio грузятся целиком
+funding можно наполнять дальше уже сейчас — запись идемпотентна, а качество
+проверяется из CLI командой `validate-data` (`DATA-8`): на всей загруженной
+истории дефектов нет. Open interest и long/short ratio грузятся целиком
 (`REG-5` закрыт), а поскольку Binance отдаёт их лишь за 30 дней, их историю
 накапливает регулярный сбор — см. «Регулярный сбор рыночных рядов». Подробно —
 [`tickets/README.md`](tickets/README.md).
@@ -49,7 +50,7 @@ Python 3.11+ · Polars · DuckDB · Parquet · SQLite · pydantic · Typer (CLI)
 
 ```
 configs/      YAML-конфиги экспериментов и источников данных
-data/         raw / features / results (вне git)
+data/         raw / features / results / reports (вне git)
 src/trading_research/
   config.py   конфиг эксперимента (pydantic) + загрузчик YAML
   domain.py   доменные типы (TimeSlice, ExecutionModel, SliceMode)
@@ -62,9 +63,9 @@ src/trading_research/
   experiments/orchestrator, runner, grid/random search, time_splitters,
               cache, parallel, results_store, walk_forward, holdout
   analytics/  queries, stability, correlations, plots
-  cli/        main, fetch_data, fetch_market_data, build_features,
-              run_experiment, walk_forward, analyze_results, analyze_regimes,
-              export_results, plot_heatmap
+  cli/        main, fetch_data, fetch_market_data, update_market_data,
+              validate_data, build_features, run_experiment, walk_forward,
+              analyze_results, analyze_regimes, export_results, plot_heatmap
 notebooks/    исследовательские ноутбуки
 ops/          скрипт и launchd-агент регулярного сбора (OPS-1)
 tests/        тесты
@@ -73,7 +74,7 @@ tickets/      план работ (по эпикам E0..E8)
 
 ## Пайплайн
 
-Полный прогон исследования — восемь шагов, все из корня репозитория в
+Полный прогон исследования — девять шагов, все из корня репозитория в
 активированном venv. Числа в комментариях — замеры прогона RUN-7 (Apple Silicon,
 14 ядер, конфиг `ma_cross_multi_1h_4h`).
 
@@ -97,34 +98,40 @@ for s in BTCUSDT ETHUSDT SOLUSDT; do for tf in 1h 4h; do
   done
 done; done
 
-# 3. Фичи режима по слайсам
+# 3. Проверка качества загруженного: пропуски, дубли, монотонность, OHLC,
+#    выбросы — по свечам и по рядам funding/OI/LS. JSON-отчёты в data/reports/.
+#    --strict даёт код 1 при дефектах: так шаг можно ставить перед прогоном.
+trading-research validate-data --config configs/experiments/ma_cross_multi_1h_4h.yaml \
+  --strict
+
+# 4. Фичи режима по слайсам
 trading-research build-features --config configs/experiments/ma_cross_multi_1h_4h.yaml
 
-# 4. Сетка по слайсам (4.7 с на 14 воркерах, resume/dedupe по run_hash)
+# 5. Сетка по слайсам (4.7 с на 14 воркерах, resume/dedupe по run_hash)
 trading-research run-experiment --config configs/experiments/ma_cross_multi_1h_4h.yaml
 
-# 5. Ранжирование и stability
+# 6. Ранжирование и stability
 trading-research analyze-results --experiment ma_cross_multi --metric sharpe --top 6
 trading-research export-results --experiment ma_cross_multi --kind stability --metric sharpe
 
-# 6. Карты параметров
+# 7. Карты параметров
 trading-research plot-heatmap --experiment ma_cross_multi --x fast_ma --y slow_ma \
   --metric sharpe --agg median
 
-# 7. Честный OOS + untouched holdout (13 с, 270 фолдов)
+# 8. Честный OOS + untouched holdout (13 с, 270 фолдов)
 trading-research walk-forward --config configs/experiments/ma_cross_multi_1h_4h.yaml
 
-# 8. Корреляции параметры ↔ режим
+# 9. Корреляции параметры ↔ режим
 trading-research analyze-regimes --experiment ma_cross_multi --metric sharpe
 ```
 
-Результаты шага 4 и далее складываются в `data/results/<experiment>/`:
+Результаты шага 5 и далее складываются в `data/results/<experiment>/`:
 `performance.parquet` (пер-слайс метрики), `catalog.sqlite` (runs + run_metrics),
 `wf/<symbol>/<timeframe>/` (выборы по фолдам, OOS equity, `holdout_report.json`).
 
-Шаги 5–8 читают уже посчитанное, поэтому их можно гонять повторно без пересчёта.
-Шаг 7 считает всё сам и в кэш результатов не смотрит — это осознанно: honest OOS
-не имеет права видеть сетку из шага 4.
+Шаги 6–9 читают уже посчитанное, поэтому их можно гонять повторно без пересчёта.
+Шаг 8 считает всё сам и в кэш результатов не смотрит — это осознанно: honest OOS
+не имеет права видеть сетку из шага 5.
 
 ## Регулярный сбор рыночных рядов
 
@@ -239,5 +246,5 @@ MVP: `INF-1..3 → DATA-1..6 → BT-1..8 → EXP-1..6 → AN-1..4`; далее
 E5 (walk-forward) → E6 (market regimes) → E7 (первый реальный прогон)
 → E8 (эксплуатация данных).
 
-Текущий фронт: `DATA-8`, `DATA-7` (проверяемое наполнение базы) →
-`RUN-9`, `RUN-8`.
+Текущий фронт: `RUN-9` (holdout в выводе `walk-forward`) → `RUN-8` →
+`OPS-2`.

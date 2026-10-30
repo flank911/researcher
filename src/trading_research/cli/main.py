@@ -41,6 +41,16 @@ from trading_research.cli.update_market_data import (
     has_defects,
     update_market_data_from_config,
 )
+from trading_research.cli.validate_data import (
+    describe_pair,
+    validate_data_from_config,
+)
+from trading_research.cli.validate_data import (
+    describe_total as describe_validation_total,
+)
+from trading_research.cli.validate_data import (
+    has_defects as has_validation_defects,
+)
 from trading_research.cli.walk_forward import walk_forward_from_config
 
 app = typer.Typer(
@@ -142,6 +152,41 @@ def update_market_data_cmd(
     # расписания: иначе провал сбора обнаружится через месяц, когда окно
     # retention уже съело историю.
     if has_defects(updates):
+        raise typer.Exit(code=1)
+
+
+@app.command("validate-data")
+def validate_data_cmd(
+    config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
+    symbol: list[str] = typer.Option(
+        None, "--symbol", help="Проверить только эти тикеры (по умолчанию — все из конфига)."
+    ),
+    timeframe: list[str] = typer.Option(
+        None, "--timeframe", help="Проверить только эти таймфреймы (по умолчанию — все)."
+    ),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+    out: Path = typer.Option(Path("data/reports"), help="Корень для JSON-отчётов."),
+    strict: bool = typer.Option(
+        False, "--strict", help="Ненулевой код возврата при найденных дефектах."
+    ),
+) -> None:
+    """Проверить качество загруженных данных (свечи и ряды funding/OI/LS)."""
+    pairs = validate_data_from_config(
+        config,
+        data_root=data_root,
+        reports_root=out,
+        symbols=list(symbol) if symbol else None,
+        timeframes=list(timeframe) if timeframe else None,
+    )
+    for pair in pairs:
+        for line in describe_pair(pair):
+            typer.echo(line)
+    typer.echo(describe_validation_total(pairs, out))
+
+    # Без --strict команда остаётся диагностикой: дефекты видны, код 0. С ним её
+    # можно ставить в пайплайн перед run-experiment — тогда прогон не стартует
+    # на данных с дырами.
+    if strict and has_validation_defects(pairs):
         raise typer.Exit(code=1)
 
 

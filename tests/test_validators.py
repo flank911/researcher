@@ -86,18 +86,87 @@ def test_holey_dataset_finds_all_gaps() -> None:
 
 
 def test_leading_and_trailing_gaps_with_window() -> None:
-    rows = _run([2, 3, 4])  # данные с часа 2 по 4
+    """Границы окна — полуинтервал ``[start, end)`` (DATA-7).
+
+    Данные с часа 2 по 4, окно [0, 6) ждёт часы 0..5: слева не хватает 0 и 1,
+    справа — только 5. Часа 6 в окне нет, и считать его пропущенным нельзя.
+    """
+    rows = _run([2, 3, 4])
     report = validate_candles(
         _df(rows),
         timeframe="1h",
-        expected_start=T0,  # окно с часа 0 → ведущий пропуск 2 бара
-        expected_end=T0 + 6 * H,  # до часа 6 → замыкающий пропуск 2 бара
+        expected_start=T0,
+        expected_end=T0 + 6 * H,
     )
     assert len(report.gaps) == 2
     assert report.gaps[0].missing_bars == 2  # часы 0,1
     assert report.gaps[0].start == T0
-    assert report.gaps[-1].missing_bars == 2  # часы 5,6
+    assert report.gaps[-1].missing_bars == 1  # час 5; часа 6 в окне нет
     assert report.gaps[-1].end == T0 + 6 * H
+
+
+# --- DATA-7: граница окна согласована с fetch-data --------------------------
+
+
+def test_full_window_is_clean() -> None:
+    """Полный датасет за ``[start, end)`` не содержит дефектов.
+
+    До исправления валидатор находил на каждом чистом датасете ровно один
+    несуществующий пропуск на правом краю, то есть ``is_clean`` был недостижим.
+    """
+    report = validate_candles(
+        _df(_run(list(range(6)))),
+        timeframe="1h",
+        expected_start=T0,
+        expected_end=T0 + 6 * H,
+    )
+    assert report.gaps == []
+    assert report.is_clean
+
+
+def test_missing_last_bar_is_still_found() -> None:
+    """Исправление не должно заглушить проверку правого края."""
+    report = validate_candles(
+        _df(_run(list(range(5)))),  # нет часа 5
+        timeframe="1h",
+        expected_start=T0,
+        expected_end=T0 + 6 * H,
+    )
+    assert len(report.gaps) == 1
+    assert report.gaps[0].missing_bars == 1
+    assert not report.is_clean
+
+
+@pytest.mark.parametrize("absent", [1, 2, 5])
+def test_trailing_gap_counts_only_bars_inside_window(absent: int) -> None:
+    """Сколько бы баров ни не хватало с конца, считаются только те, что в окне."""
+    present = 6 - absent
+    report = validate_candles(
+        _df(_run(list(range(present)))),
+        timeframe="1h",
+        expected_start=T0,
+        expected_end=T0 + 6 * H,
+    )
+    assert report.gaps[-1].missing_bars == absent
+
+
+def test_window_matching_fetch_data_semantics() -> None:
+    """Согласованность с загрузчиком, а не только внутренняя логика.
+
+    ``fetch-data --start S --end E`` отдаёт ровно ``(E - S) / timeframe`` баров;
+    валидатор с теми же границами обязан назвать такой датасет чистым.
+    """
+    bars = 24
+    rows = _run(list(range(bars)))
+    assert len(rows) == bars
+
+    report = validate_candles(
+        _df(rows),
+        timeframe="1h",
+        expected_start=T0,
+        expected_end=T0 + bars * H,
+    )
+    assert report.is_clean, f"пропуски на чистом датасете: {report.gaps}"
 
 
 # --- duplicates / monotonicity ----------------------------------------------
