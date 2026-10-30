@@ -1,0 +1,69 @@
+schema_version: 2
+name: ma_cross_multi
+description: >
+  RUN-6 — сетка по трём символам и двум таймфреймам. Нужен, чтобы срезы
+  params_by_symbol (AN-2) и params_by_timeframe (AN-1) наполнялись одним
+  прогоном, а не склейкой нескольких.
+
+data:
+  exchange: binance
+  market: futures
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+  timeframes:
+    - 1h
+    - 4h
+  start: "2022-01-01"
+  end: "2026-10-01"
+
+time_slices:
+  type: quarter
+  # В барах, поэтому порог отсекает разные кварталы на 1h и на 4h —
+  # окна считаются на каждый таймфрейм отдельно (см. slices_by_timeframe).
+  min_bars: 300
+
+strategy:
+  name: ma_cross
+
+params_grid:
+  fast_ma: [10, 20, 50]
+  slow_ma: [100, 200]
+
+execution:
+  initial_balance: 10000
+  commission_rate: 0.0006
+  slippage_pct: 0.0003
+  leverage: 3
+  position_size_type: percent_balance
+  position_size_value: 20
+  allow_short: true
+  close_on_reverse_signal: true
+  signal_lag: 1
+  fill_on: next_open
+
+walk_forward:
+  train_days: 180
+  test_days: 30
+  step_days: 30
+  select_by: sharpe
+  anchored: false
+
+holdout:
+  start: "2026-04-01"
+
+metrics:
+  primary: stability_score
+  secondary:
+    - total_return_pct
+    - max_drawdown_pct
+    - sharpe
+    - profit_factor
+    - win_rate
+    - trades_count
+
+output:
+  save_trades: true
+  save_equity_curve: true
+  save_plots: false

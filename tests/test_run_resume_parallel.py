@@ -61,13 +61,13 @@ def _config(
     path.write_text(
         textwrap.dedent(
             f"""
-            schema_version: 1
+            schema_version: 2
             name: run1_exp
             data:
               exchange: binance
               market: futures
               symbols: [BTCUSDT]
-              timeframe: 1h
+              timeframes: [1h]
               start: "2024-01-01"
               end: "2024-03-01"
             time_slices:

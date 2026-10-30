@@ -75,13 +75,13 @@ def _config(
     path.write_text(
         textwrap.dedent(
             f"""
-            schema_version: 1
+            schema_version: 2
             name: {EXP}
             data:
               exchange: binance
               market: futures
               symbols: {symbols}
-              timeframe: 1h
+              timeframes: [1h]
               start: "2024-01-01"
               end: "{end}"
             time_slices:
@@ -178,9 +178,8 @@ def test_select_by_reaches_holdout_report(tmp_path: Path) -> None:
         holdout='start: "2024-05-01"',
     )
     walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
-    report = json.loads(
-        (wf_dir(results_root, EXP, "BTCUSDT") / HOLDOUT_REPORT_FILE).read_text(encoding="utf-8")
-    )
+    report_path = wf_dir(results_root, EXP, "BTCUSDT", "1h") / HOLDOUT_REPORT_FILE
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["metric"] == "max_drawdown_pct"
 
 
@@ -262,11 +261,11 @@ def test_walk_forward_writes_artifacts(tmp_path: Path) -> None:
     cfg = _config(tmp_path / "e.yaml")
 
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
-    assert set(results) == {"BTCUSDT"}
-    result = results["BTCUSDT"]
+    assert set(results) == {("BTCUSDT", "1h")}
+    result = results["BTCUSDT", "1h"]
     assert result.selections, "ожидали хотя бы один фолд с выбором"
 
-    out = wf_dir(results_root, EXP, "BTCUSDT")
+    out = wf_dir(results_root, EXP, "BTCUSDT", "1h")
     assert (out / OOS_EQUITY_FILE).exists()
     equity = pl.read_parquet(out / OOS_EQUITY_FILE)
     assert equity.height > 0
@@ -293,7 +292,7 @@ def test_oos_curve_contains_only_test_bars(tmp_path: Path) -> None:
     cfg = load_experiment_config(cfg_path)
     folds = build_folds(cfg, cfg.data.end)
 
-    equity = results["BTCUSDT"].oos_equity
+    equity = results["BTCUSDT", "1h"].oos_equity
     assert equity.height > 0
     test_windows = [(f.test.start, f.test.end) for f in folds]
     for ts in equity["open_time"].to_list():
@@ -308,9 +307,9 @@ def test_multi_symbol_separate_dirs(tmp_path: Path) -> None:
     cfg = _config(tmp_path / "e.yaml", symbols="[BTCUSDT, ETHUSDT]")
 
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
-    assert set(results) == {"BTCUSDT", "ETHUSDT"}
+    assert set(results) == {("BTCUSDT", "1h"), ("ETHUSDT", "1h")}
     for sym in ("BTCUSDT", "ETHUSDT"):
-        assert (wf_dir(results_root, EXP, sym) / OOS_EQUITY_FILE).exists()
+        assert (wf_dir(results_root, EXP, sym, "1h") / OOS_EQUITY_FILE).exists()
 
 
 # --- holdout ---------------------------------------------------------------
@@ -322,14 +321,14 @@ def test_holdout_report_written(tmp_path: Path) -> None:
     cfg = _config(tmp_path / "e.yaml", holdout='start: "2024-05-01"')
 
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
-    out = wf_dir(results_root, EXP, "BTCUSDT")
+    out = wf_dir(results_root, EXP, "BTCUSDT", "1h")
     report = json.loads((out / HOLDOUT_REPORT_FILE).read_text(encoding="utf-8"))
 
     assert report["symbol"] == "BTCUSDT"
     assert report["metric"] == "total_return_pct"
     assert report["params"]
     # Сравнение именно с OOS-оценкой research, а не с train-скором.
-    oos = results["BTCUSDT"].oos_metrics.total_return_pct
+    oos = results["BTCUSDT", "1h"].oos_metrics.total_return_pct
     assert report["research_value"] == pytest.approx(oos)
     assert report["degradation"] == pytest.approx(
         report["research_value"] - report["holdout_value"]
@@ -343,10 +342,9 @@ def test_holdout_params_come_from_last_fold(tmp_path: Path) -> None:
     cfg = _config(tmp_path / "e.yaml", holdout='start: "2024-05-01"')
 
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
-    report = json.loads(
-        (wf_dir(results_root, EXP, "BTCUSDT") / HOLDOUT_REPORT_FILE).read_text(encoding="utf-8")
-    )
-    assert report["params"] == results["BTCUSDT"].selections[-1].params
+    report_path = wf_dir(results_root, EXP, "BTCUSDT", "1h") / HOLDOUT_REPORT_FILE
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["params"] == results["BTCUSDT", "1h"].selections[-1].params
 
 
 def test_reserved_symbol_excluded_from_research(tmp_path: Path) -> None:
@@ -356,8 +354,8 @@ def test_reserved_symbol_excluded_from_research(tmp_path: Path) -> None:
     cfg = _config(tmp_path / "e.yaml", symbols="[BTCUSDT, ETHUSDT]", holdout="symbols: [ETHUSDT]")
 
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
-    assert set(results) == {"BTCUSDT"}
-    assert not wf_dir(results_root, EXP, "ETHUSDT").exists()
+    assert set(results) == {("BTCUSDT", "1h")}
+    assert not wf_dir(results_root, EXP, "ETHUSDT", "1h").exists()
 
 
 def test_research_never_contains_holdout_bars(tmp_path: Path) -> None:
@@ -404,7 +402,7 @@ def test_cli_walk_forward_smoke(tmp_path: Path) -> None:
     assert "BTCUSDT" in result.output
     assert "folds" in result.output
     assert "OOS:" in result.output
-    assert (wf_dir(results_root, EXP, "BTCUSDT") / HOLDOUT_REPORT_FILE).exists()
+    assert (wf_dir(results_root, EXP, "BTCUSDT", "1h") / HOLDOUT_REPORT_FILE).exists()
 
 
 def test_cli_no_symbols_message(tmp_path: Path) -> None:

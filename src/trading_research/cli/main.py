@@ -142,8 +142,8 @@ def walk_forward_cmd(
     if not results:
         typer.echo("no symbols produced walk-forward results")
         return
-    for symbol, result in results.items():
-        typer.echo(f"\n{symbol}: {len(result.selections)} folds")
+    for (symbol, timeframe), result in results.items():
+        typer.echo(f"\n{symbol} {timeframe}: {len(result.selections)} folds")
         for sel in result.selections:
             typer.echo(f"  fold {sel.fold}: {sel.params} train={sel.train_score:.4f}")
         m = result.oos_metrics

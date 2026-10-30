@@ -26,10 +26,18 @@ class StrictModel(BaseModel):
 
 
 class DataConfig(StrictModel):
+    """Источник данных эксперимента.
+
+    RUN-6: ``timeframes`` — список, как и ``symbols``; прогон идёт по всем парам
+    символ × таймфрейм. Скалярное ``timeframe`` из v1 намеренно **не**
+    поддерживается: ``extra="forbid"`` даёт на него явную ошибку, а тихое
+    превращение одного значения в список спрятало бы смену формата.
+    """
+
     exchange: str
     market: str
     symbols: list[str] = Field(min_length=1)
-    timeframe: str
+    timeframes: list[str] = Field(min_length=1)
     start: datetime
     end: datetime
 
@@ -122,6 +130,23 @@ class ExperimentConfig(StrictModel):
     # `walk-forward` требует только `walk_forward`.
     walk_forward: WalkForwardConfig | None = None
     holdout: HoldoutConfig | None = None
+
+    @field_validator("schema_version")
+    @classmethod
+    def _supported_version(cls, value: int) -> int:
+        """Версия формата проверяется, а не просто хранится.
+
+        До RUN-6 поле существовало, но ни с чем не сверялось — то есть было
+        декоративным. Теперь несовпадение останавливает загрузку: v1-конфиг со
+        скалярным ``timeframe`` получает и ошибку о неизвестном поле, и внятное
+        объяснение, почему он больше не подходит.
+        """
+        if value != SCHEMA_VERSION:
+            raise ValueError(
+                f"unsupported schema_version {value}; this build expects {SCHEMA_VERSION}. "
+                "v1 → v2: data.timeframe (скаляр) заменён на data.timeframes (список)"
+            )
+        return value
 
 
 def load_experiment_config(path: str | Path) -> ExperimentConfig:
