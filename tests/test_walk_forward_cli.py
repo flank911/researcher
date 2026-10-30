@@ -12,19 +12,26 @@ import pytest
 from pydantic import ValidationError
 from typer.testing import CliRunner
 
+from trading_research.backtest.metrics import Metrics
 from trading_research.cli.main import app
 from trading_research.cli.walk_forward import (
     HOLDOUT_REPORT_FILE,
     OOS_EQUITY_FILE,
     SELECTIONS_FILE,
+    HoldoutStatus,
+    PairOutcome,
     build_folds,
     build_split,
+    describe_holdout,
+    describe_total,
     walk_forward_from_config,
     wf_dir,
 )
 from trading_research.config import load_experiment_config
 from trading_research.data.schema import CANDLE_SCHEMA
 from trading_research.data.storage.parquet_store import ParquetStore
+from trading_research.experiments.holdout import HoldoutReport
+from trading_research.experiments.walk_forward import WalkForwardResult
 
 runner = CliRunner()
 T0 = datetime(2024, 1, 1, tzinfo=UTC)
@@ -262,7 +269,9 @@ def test_walk_forward_writes_artifacts(tmp_path: Path) -> None:
 
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
     assert set(results) == {("BTCUSDT", "1h")}
-    result = results["BTCUSDT", "1h"]
+    outcome = results["BTCUSDT", "1h"]
+    result = outcome.result
+    assert result is not None
     assert result.selections, "ожидали хотя бы один фолд с выбором"
 
     out = wf_dir(results_root, EXP, "BTCUSDT", "1h")
@@ -292,7 +301,7 @@ def test_oos_curve_contains_only_test_bars(tmp_path: Path) -> None:
     cfg = load_experiment_config(cfg_path)
     folds = build_folds(cfg, cfg.data.end)
 
-    equity = results["BTCUSDT", "1h"].oos_equity
+    equity = results["BTCUSDT", "1h"].result.oos_equity
     assert equity.height > 0
     test_windows = [(f.test.start, f.test.end) for f in folds]
     for ts in equity["open_time"].to_list():
@@ -328,7 +337,7 @@ def test_holdout_report_written(tmp_path: Path) -> None:
     assert report["metric"] == "total_return_pct"
     assert report["params"]
     # Сравнение именно с OOS-оценкой research, а не с train-скором.
-    oos = results["BTCUSDT", "1h"].oos_metrics.total_return_pct
+    oos = results["BTCUSDT", "1h"].result.oos_metrics.total_return_pct
     assert report["research_value"] == pytest.approx(oos)
     assert report["degradation"] == pytest.approx(
         report["research_value"] - report["holdout_value"]
@@ -344,7 +353,7 @@ def test_holdout_params_come_from_last_fold(tmp_path: Path) -> None:
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
     report_path = wf_dir(results_root, EXP, "BTCUSDT", "1h") / HOLDOUT_REPORT_FILE
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["params"] == results["BTCUSDT", "1h"].selections[-1].params
+    assert report["params"] == results["BTCUSDT", "1h"].result.selections[-1].params
 
 
 def test_reserved_symbol_excluded_from_research(tmp_path: Path) -> None:
@@ -354,8 +363,14 @@ def test_reserved_symbol_excluded_from_research(tmp_path: Path) -> None:
     cfg = _config(tmp_path / "e.yaml", symbols="[BTCUSDT, ETHUSDT]", holdout="symbols: [ETHUSDT]")
 
     results = walk_forward_from_config(cfg, data_root=data_root, results_root=results_root)
-    assert set(results) == {("BTCUSDT", "1h")}
     assert not wf_dir(results_root, EXP, "ETHUSDT", "1h").exists()
+    assert results["BTCUSDT", "1h"].was_run
+
+    # RUN-9: пара не исчезает из результата, а называет причину — иначе «её не
+    # считали» и «её не было в конфиге» выглядят одинаково.
+    reserved = results["ETHUSDT", "1h"]
+    assert not reserved.was_run
+    assert reserved.holdout_status is HoldoutStatus.SYMBOL_RESERVED
 
 
 def test_research_never_contains_holdout_bars(tmp_path: Path) -> None:
@@ -405,8 +420,8 @@ def test_cli_walk_forward_smoke(tmp_path: Path) -> None:
     assert (wf_dir(results_root, EXP, "BTCUSDT", "1h") / HOLDOUT_REPORT_FILE).exists()
 
 
-def test_cli_no_symbols_message(tmp_path: Path) -> None:
-    """Нет данных — внятное сообщение, а не пустой вывод."""
+def test_cli_no_data_names_the_reason(tmp_path: Path) -> None:
+    """Нет данных — названная причина по каждой паре, а не пустой вывод."""
     cfg = _config(tmp_path / "e.yaml")
     result = runner.invoke(
         app,
@@ -421,4 +436,192 @@ def test_cli_no_symbols_message(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "no symbols" in result.output
+    assert "нет данных в окне конфига" in result.output
+    assert "не прогналась" in result.output
+
+
+# --- RUN-9: holdout в выводе команды ---------------------------------------
+
+
+def _metrics(*, trades: int, reliable: bool, min_trades: int = 10) -> Metrics:
+    return Metrics(
+        total_return_pct=1.0,
+        max_drawdown_pct=2.0,
+        sharpe=0.5,
+        sortino=0.5,
+        profit_factor=1.1,
+        win_rate=0.5,
+        avg_trade_pct=0.1,
+        expectancy=0.1,
+        recovery_factor=1.0,
+        trades_count=trades,
+        annualization_factor=1.0,
+        min_trades=min_trades,
+        reliable=reliable,
+    )
+
+
+def _wf_result() -> WalkForwardResult:
+    """Минимальный прогон — нужен только как признак «пара прогналась»."""
+    return WalkForwardResult(
+        selections=[],
+        oos_equity=pl.DataFrame({"open_time": [T0], "equity": [10_000.0]}),
+        oos_metrics=_metrics(trades=50, reliable=True),
+    )
+
+
+def _outcome(
+    *,
+    research: float,
+    holdout_value: float,
+    trades: int = 50,
+    reliable: bool = True,
+    metric: str = "sharpe",
+) -> PairOutcome:
+    report = HoldoutReport(
+        symbol="BTCUSDT",
+        params={"fast_ma": 10, "slow_ma": 100},
+        metric=metric,
+        research_value=research,
+        holdout_value=holdout_value,
+        degradation=research - holdout_value,
+        holdout_metrics=_metrics(trades=trades, reliable=reliable),
+    )
+    return PairOutcome(
+        symbol="BTCUSDT",
+        timeframe="1h",
+        holdout_status=HoldoutStatus.DONE,
+        result=_wf_result(),
+        holdout=report,
+    )
+
+
+def _invoke_wf(tmp_path: Path, cfg: Path, data_root: Path) -> object:
+    return runner.invoke(
+        app,
+        [
+            "walk-forward",
+            "--config",
+            str(cfg),
+            "--data-root",
+            str(data_root),
+            "--results-root",
+            str(tmp_path / "res"),
+        ],
+    )
+
+
+def test_cli_prints_holdout_next_to_oos(tmp_path: Path) -> None:
+    """Главный результат исследования должен быть на экране, а не только в JSON."""
+    data_root = tmp_path / "raw"
+    _seed(data_root)
+    cfg = _config(tmp_path / "e.yaml", holdout='start: "2024-05-01"')
+
+    result = _invoke_wf(tmp_path, cfg, data_root)
+
+    assert result.exit_code == 0, result.output
+    assert "holdout:" in result.output
+    assert "research=" in result.output
+    assert "сделок" in result.output
+    assert "параметры" in result.output
+    # Holdout идёт сразу за OOS, а не теряется среди фолдов.
+    lines = [ln.strip() for ln in result.output.splitlines() if ln.strip()]
+    oos_index = next(i for i, ln in enumerate(lines) if ln.startswith("OOS:"))
+    assert lines[oos_index + 1].startswith("holdout:")
+
+
+def test_cli_prints_summary_over_all_pairs(tmp_path: Path) -> None:
+    data_root = tmp_path / "raw"
+    _seed(data_root)
+    cfg = _config(tmp_path / "e.yaml", holdout='start: "2024-05-01"')
+
+    result = _invoke_wf(tmp_path, cfg, data_root)
+
+    assert "итого: прогнано 1 пара" in result.output
+    assert "holdout посчитан по 1" in result.output
+
+
+def test_cli_explains_absent_holdout_section(tmp_path: Path) -> None:
+    """Без секции holdout — строка с причиной, а не тишина."""
+    data_root = tmp_path / "raw"
+    _seed(data_root)
+    cfg = _config(tmp_path / "e.yaml")
+
+    result = _invoke_wf(tmp_path, cfg, data_root)
+
+    assert result.exit_code == 0, result.output
+    assert "holdout: не считался — в конфиге нет секции holdout" in result.output
+
+
+def test_cli_explains_empty_reserve(tmp_path: Path) -> None:
+    """Резерв начинается после конца данных — holdout считать не на чем."""
+    data_root = tmp_path / "raw"
+    _seed(data_root)
+    cfg = _config(tmp_path / "e.yaml", holdout='start: "2024-06-25"', end="2024-06-01")
+
+    result = _invoke_wf(tmp_path, cfg, data_root)
+
+    assert result.exit_code == 0, result.output
+    assert "holdout: не считался — резерв по этой паре пуст" in result.output
+
+
+def test_cli_explains_reserved_symbol(tmp_path: Path) -> None:
+    """Зарезервированный символ раньше исчезал из вывода целиком."""
+    data_root = tmp_path / "raw"
+    _seed(data_root, symbols=("BTCUSDT", "ETHUSDT"))
+    cfg = _config(tmp_path / "e.yaml", symbols="[BTCUSDT, ETHUSDT]", holdout="symbols: [ETHUSDT]")
+
+    result = _invoke_wf(tmp_path, cfg, data_root)
+
+    assert result.exit_code == 0, result.output
+    assert "ETHUSDT 1h: пропущен — символ целиком в резерве" in result.output
+    assert "пропущено 1" in result.output
+
+
+def test_unreliable_holdout_is_marked() -> None:
+    """Два лучших holdout прогона RUN-7 получены на 6 сделках — это должно быть видно."""
+    line = describe_holdout(_outcome(research=0.5, holdout_value=2.47, trades=6, reliable=False))
+
+    assert "НЕНАДЁЖНО" in line
+    assert "порога 10" in line
+    assert "сделок 6" in line
+
+
+def test_reliable_holdout_has_no_warning() -> None:
+    assert "НЕНАДЁЖНО" not in describe_holdout(_outcome(research=0.5, holdout_value=0.4))
+
+
+def test_degradation_sign_is_named_not_signed() -> None:
+    worse = describe_holdout(_outcome(research=0.07, holdout_value=-1.70))
+    better = describe_holdout(_outcome(research=0.52, holdout_value=1.67))
+
+    assert "деградация 1.7700" in worse
+    assert "прирост 1.1500 (на резерве лучше)" in better
+    # «деградация … (на резерве лучше)» читалось бы как противоречие.
+    assert "деградация" not in better
+
+
+def test_undefined_metric_does_not_look_like_a_number() -> None:
+    line = describe_holdout(_outcome(research=float("nan"), holdout_value=float("nan")))
+
+    assert "research=—" in line
+    assert "деградация неизвестна" in line
+
+
+def test_percent_metric_is_formatted_as_percent() -> None:
+    line = describe_holdout(_outcome(research=12.0, holdout_value=4.0, metric="total_return_pct"))
+
+    assert "research=12.00%" in line
+    assert "деградация 8.00%" in line
+
+
+def test_summary_counts_only_degraded_pairs() -> None:
+    outcomes = [
+        _outcome(research=1.0, holdout_value=0.0),  # хуже на резерве
+        _outcome(research=0.0, holdout_value=1.0),  # лучше на резерве
+        _outcome(research=1.0, holdout_value=0.5, trades=3, reliable=False),
+    ]
+    summary = describe_total(outcomes)
+
+    assert "хуже research на 2 из 3" in summary
+    assert "ненадёжных по числу сделок 1" in summary

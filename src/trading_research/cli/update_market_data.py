@@ -38,6 +38,7 @@ from trading_research.cli.fetch_market_data import (
     expand_series,
     fetch_market_data,
 )
+from trading_research.cli.text import points
 from trading_research.config import ExperimentConfig, load_experiment_config
 from trading_research.data.ingestion.market_data_client import (
     PERIOD_MS,
@@ -277,7 +278,7 @@ def describe_update(update: SeriesUpdate) -> str:
 
     assert update.coverage is not None  # noqa: S101 — следствие is_up_to_date выше
     before = "store пуст" if update.is_first_load else f"было до {_fmt(update.stored_until)}"
-    added = f"дописано {_points(update.rows)}"
+    added = f"дописано {points(update.rows)}"
     if update.coverage.last is not None:
         added += f" до {_fmt(update.coverage.last)}"
 
@@ -304,7 +305,7 @@ def describe_total(updates: list[SeriesUpdate]) -> str:
     incomplete = [u for u in updates if u.is_incomplete]
     fresh = [u for u in updates if u.is_up_to_date]
 
-    total = f"итого: {_points(rows)} по {len(updates)} рядам"
+    total = f"итого: {points(rows)} по {len(updates)} рядам"
     if fresh:
         total += f", уже актуальны: {len(fresh)}"
     if lost:
@@ -323,18 +324,6 @@ def has_defects(updates: list[SeriesUpdate]) -> bool:
 
 def _fmt(moment: datetime | None) -> str:
     return moment.strftime("%Y-%m-%d %H:%M") if moment else "—"
-
-
-def _points(count: int) -> str:
-    """«1 точка» / «3 точки» / «18 точек» — строку читают люди."""
-    tail, hundred = count % 10, count % 100
-    if tail == 1 and hundred != 11:
-        form = "точка"
-    elif tail in (2, 3, 4) and hundred not in (12, 13, 14):
-        form = "точки"
-    else:
-        form = "точек"
-    return f"{count} {form}"
 
 
 def _fmt_delta(delta: timedelta) -> str:

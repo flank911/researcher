@@ -51,7 +51,13 @@ from trading_research.cli.validate_data import (
 from trading_research.cli.validate_data import (
     has_defects as has_validation_defects,
 )
-from trading_research.cli.walk_forward import walk_forward_from_config
+from trading_research.cli.walk_forward import (
+    describe_outcome,
+    walk_forward_from_config,
+)
+from trading_research.cli.walk_forward import (
+    describe_total as describe_wf_total,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -233,19 +239,15 @@ def walk_forward_cmd(
     results_root: Path = typer.Option(Path("data/results"), help="Корень для результатов."),
 ) -> None:
     """Прогнать walk-forward (честный OOS) и, если задан, holdout."""
-    results = walk_forward_from_config(config, data_root=data_root, results_root=results_root)
-    if not results:
-        typer.echo("no symbols produced walk-forward results")
-        return
-    for (symbol, timeframe), result in results.items():
-        typer.echo(f"\n{symbol} {timeframe}: {len(result.selections)} folds")
-        for sel in result.selections:
-            typer.echo(f"  fold {sel.fold}: {sel.params} train={sel.train_score:.4f}")
-        m = result.oos_metrics
-        typer.echo(
-            f"  OOS: return={m.total_return_pct:.2f}% dd={m.max_drawdown_pct:.2f}% "
-            f"trades={m.trades_count} reliable={m.reliable}"
-        )
+    outcomes = walk_forward_from_config(config, data_root=data_root, results_root=results_root)
+    # Holdout печатается вместе с OOS, а его отсутствие — отдельной причиной:
+    # главный результат исследования не должен жить только в JSON (RUN-9).
+    for outcome in outcomes.values():
+        typer.echo("")
+        for line in describe_outcome(outcome):
+            typer.echo(line)
+    typer.echo("")
+    typer.echo(describe_wf_total(list(outcomes.values())))
 
 
 @app.command("analyze-results")
