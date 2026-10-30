@@ -146,6 +146,9 @@ trading-research update-market-data --config configs/experiments/ma_cross_multi_
 
 ### Поставить по расписанию (launchd, macOS)
 
+Агент уже загружен в этой системе (2026-10-30). Команды ниже — для переустановки
+или для другой машины.
+
 ```bash
 cp ops/com.trading-research.update-market-data.plist ~/Library/LaunchAgents/
 ```
