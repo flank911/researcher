@@ -27,6 +27,7 @@ data/raw/
 data/processed/
 data/features/
 data/results/
+data/reports/
 data/logs/
 *.parquet
 *.duckdb

@@ -9,6 +9,10 @@
 - **Аномалии цены** — нарушения OHLC-инвариантов (``high``/``low``) и выбросы
   доходности бар-к-бару.
 
+Границы окна — полуинтервал ``[start, end)`` (DATA-7): начало включительно, конец
+эксклюзивно, как в ``fetch-data`` и в конфиге эксперимента. Датасет, загруженный с
+теми же границами, должен давать ``is_clean=True``.
+
 Учитывается дата листинга символа: отсутствие данных до ``listing_at`` — не ошибка
 (ведущий пропуск до листинга не попадает в отчёт).
 
@@ -80,8 +84,10 @@ def validate_candles(
 ) -> ValidationReport:
     """Проверить свечи и вернуть отчёт о качестве.
 
-    ``expected_start`` / ``expected_end`` — ожидаемые границы окна (включительно по
-    началу): позволяют поймать пропуски на краях, а не только между барами.
+    ``expected_start`` / ``expected_end`` — ожидаемые границы окна **полуинтервалом**
+    ``[start, end)``, как в ``fetch-data --end`` и ``DuckDBStore.read_window``:
+    позволяют поймать пропуски на краях, а не только между барами. Последний
+    ожидаемый бар — ``end - timeframe``; бара ровно на ``end`` быть не должно.
     ``listing_at`` сдвигает эффективное начало окна (данных до листинга быть не
     должно, и их отсутствие — не пропуск). ``max_return`` — порог |доходности|
     бар-к-бару для выброса цены.
@@ -156,8 +162,12 @@ def validate_candles(
     )
 
 
-def save_report(report: ValidationReport, path: str | Path) -> None:
-    """Сохранить отчёт в JSON (UTF-8, с отступами)."""
+def save_report(report: ValidationReport | SeriesValidationReport, path: str | Path) -> None:
+    """Сохранить отчёт в JSON (UTF-8, с отступами).
+
+    Принимает оба отчёта DATA-3: у свечей и у рядов funding/OI/LS одинаковый
+    способ сериализации, а CLI (DATA-8) сохраняет и те, и другие.
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(report.model_dump_json(indent=2), encoding="utf-8")
@@ -272,18 +282,33 @@ def _detect_gaps(
             )
 
     # Внутренние пропуски между соседними барами.
+    #
+    # Считаем по числу невышедших точек, а не по расстоянию между соседями: у
+    # funding время выплаты задаёт биржа, и оно плавает на единицы миллисекунд
+    # (8 ч + 1 мс встречается в истории сотни раз). Расстояние «чуть больше шага»
+    # — это дрейф, а не потерянная точка: ``missing_bars`` там равен нулю, а
+    # ``Gap`` требует ``gt=0``, так что проверка по расстоянию роняла бы
+    # валидацию funding на реальных данных.
     for a, b in zip(uniq_ms, uniq_ms[1:], strict=False):
-        if b - a > step:
-            gaps.append(Gap(start=_from_ms(a), end=_from_ms(b), missing_bars=(b - a) // step - 1))
+        missing = (b - a) // step - 1
+        if missing > 0:
+            gaps.append(Gap(start=_from_ms(a), end=_from_ms(b), missing_bars=missing))
 
     # Замыкающий пропуск: окно заканчивается после последнего бара.
+    #
+    # Граница ``expected_end`` ЭКСКЛЮЗИВНА (DATA-7), как в ``fetch-data --end``,
+    # ``DuckDBStore.read_window`` и конфиге эксперимента. Значит последний
+    # ожидаемый бар — ``end - step``, и расстояние ровно в один шаг означает
+    # полный датасет, а не пропуск. Прежнее ``>= step`` находило на каждом чистом
+    # датасете ровно один несуществующий пропуск на правом краю, из-за чего
+    # ``is_clean`` был недостижим, а настоящие пропуски приходилось отличать от
+    # этого шума глазами.
     if expected_end is not None:
         end_ms = _epoch_ms(expected_end)
         last = uniq_ms[-1]
-        if end_ms - last >= step:
-            gaps.append(
-                Gap(start=_from_ms(last), end=expected_end, missing_bars=(end_ms - last) // step)
-            )
+        missing = (end_ms - last) // step - 1
+        if missing > 0:
+            gaps.append(Gap(start=_from_ms(last), end=expected_end, missing_bars=missing))
 
     return gaps
 
