@@ -22,13 +22,13 @@ from typer.testing import CliRunner
 from trading_research.cli.fetch_market_data import CoverageStatus, SeriesKind
 from trading_research.cli.main import app
 from trading_research.cli.update_market_data import (
-    SAFE_RETENTION,
     SeriesUpdate,
     describe_total,
     describe_update,
     has_defects,
     update_market_data_from_config,
 )
+from trading_research.data.ingestion.market_data_client import SAFE_RETENTION
 from trading_research.data.schema import (
     LONG_SHORT_RATIO_SCHEMA,
     OPEN_INTEREST_SCHEMA,

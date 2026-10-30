@@ -26,7 +26,9 @@ from trading_research.analytics.correlations import (
     NUMERIC_REGIME_FEATURES,
     attach_regime_features,
     best_params_in_regime,
+    describe_availability,
     regime_correlations,
+    regime_feature_availability,
     regime_metric_summary,
 )
 from trading_research.analytics.queries import QUERYABLE_METRICS, load_performance_table
@@ -103,6 +105,20 @@ def analyze_regimes(
         return best_params_in_regime(joined, regime_label=regime, metric=metric, top=top)
 
     return regime_correlations(joined, metric=metric, by="param_hash" if by_param else None)
+
+
+def regime_availability_lines(
+    results_root: str | Path,
+    features_root: str | Path,
+    experiment: str,
+) -> list[str]:
+    """Строки про заполненность фич — печатаются под матрицей корреляций.
+
+    Отдельная функция, а не поле результата: матрица уходит и в экспорт, где
+    пояснительные строки были бы мусором в CSV.
+    """
+    joined = load_joined(results_root, features_root, experiment)
+    return describe_availability(regime_feature_availability(joined))
 
 
 def regime_summary(

@@ -34,25 +34,17 @@ from trading_research.cli.fetch_market_data import (
     MarketDataFetcher,
     SeriesCoverage,
     SeriesKind,
+    clamp_to_retention,
     expand_series,
     fetch_market_data,
 )
 from trading_research.config import ExperimentConfig, load_experiment_config
 from trading_research.data.ingestion.market_data_client import (
     PERIOD_MS,
+    RETENTION,
     BinanceMarketDataClient,
 )
 from trading_research.data.storage.parquet_store import ParquetStore
-
-# Окно доступности /futures/data/* (OI и LS). Замерено на живом API 2026-10-31:
-# startTime за 29 дней назад отвечает, за 30 — `-1130 parameter 'startTime' is
-# invalid`. Берём 29 дней: сутки запаса покрывают расхождение часов и время самого
-# запроса, иначе сбор у границы окна падал бы случайным образом.
-RETENTION = timedelta(days=30)
-SAFE_RETENTION = timedelta(days=29)
-
-# У funding окна retention нет — доступна вся история.
-_RETAINED = (SeriesKind.OPEN_INTEREST, SeriesKind.LONG_SHORT_RATIO)
 
 
 @dataclass(frozen=True)
@@ -159,7 +151,7 @@ def _update_one(
     period = _period(kind, timeframe)
 
     resume_from = _resume_from(stored_until, cfg=cfg, period=period)
-    requested_from = _clamp_to_retention(resume_from, kind=kind, now=now)
+    requested_from = clamp_to_retention(resume_from, kind=kind, now=now)
     requested_to = _right_edge(now, period=period)
 
     common = {
@@ -240,13 +232,6 @@ def _resume_from(
     if stored_until is None:
         return _as_utc(cfg.data.start)
     return stored_until + (period or timedelta(milliseconds=1))
-
-
-def _clamp_to_retention(resume_from: datetime, *, kind: SeriesKind, now: datetime) -> datetime:
-    """Урезать начало окном доступности — иначе запрос уйдёт в заведомый ``-1130``."""
-    if kind not in _RETAINED:
-        return resume_from
-    return max(resume_from, now - SAFE_RETENTION)
 
 
 def _right_edge(now: datetime, *, period: timedelta | None) -> datetime:
@@ -359,8 +344,6 @@ def _fmt_delta(delta: timedelta) -> str:
 
 
 __all__ = [
-    "RETENTION",
-    "SAFE_RETENTION",
     "SeriesUpdate",
     "describe_total",
     "describe_update",

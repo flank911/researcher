@@ -14,9 +14,17 @@ import polars as pl
 import typer
 
 from trading_research import __version__
-from trading_research.cli.analyze_regimes import analyze_regimes, export_regimes
+from trading_research.cli.analyze_regimes import (
+    analyze_regimes,
+    export_regimes,
+    regime_availability_lines,
+)
 from trading_research.cli.analyze_results import analyze_results, experiment_results_path
-from trading_research.cli.build_features import build_features_from_config
+from trading_research.cli.build_features import (
+    build_features_from_config,
+    describe_feature_coverage,
+    feature_coverage,
+)
 from trading_research.cli.export_results import export_results
 from trading_research.cli.fetch_data import fetch_data
 from trading_research.cli.fetch_market_data import (
@@ -146,6 +154,10 @@ def build_features_cmd(
     """Построить таблицу `time_slice_features` (фичи рыночного режима) по конфигу."""
     out = build_features_from_config(config, data_root=data_root, features_root=features_root)
     typer.echo(f"features -> {out}")
+    # Пустая фича иначе проходит незаметно и всплывает только в корреляциях —
+    # уже как «связи нет» вместо «данных нет» (REG-4).
+    for line in describe_feature_coverage(feature_coverage(pl.read_parquet(out))):
+        typer.echo(line)
 
 
 @app.command("run-experiment")
@@ -297,6 +309,10 @@ def analyze_regimes_cmd(
     # команды именно в том, чтобы показать все фичи сразу.
     with pl.Config(tbl_cols=-1, tbl_width_chars=200):
         typer.echo(str(table))
+    # Без этой пометки `null` от пустой фичи читается как «связи нет» (REG-4).
+    if not regime:
+        for line in regime_availability_lines(results_root, features_root, experiment):
+            typer.echo(line)
     if out:
         saved = export_regimes(
             results_root,

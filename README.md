@@ -29,7 +29,7 @@ ExperimentRun = Strategy + StrategyParams + Symbol + Timeframe
 
 ## Состояние
 
-Платформа счётно готова и проверена на реальной истории: 470 тестов, `ruff`, `mypy`
+Платформа счётно готова и проверена на реальной истории: 493 теста, `ruff`, `mypy`
 зелёные. Первое исследование проведено — BTCUSDT / ETHUSDT / SOLUSDT × 1h / 4h,
 2022-01-01 … 2026-10-01, отчёт в
 [`notebooks/004_first_research.ipynb`](notebooks/004_first_research.ipynb).
@@ -85,8 +85,9 @@ for s in BTCUSDT ETHUSDT SOLUSDT; do for tf in 1h 4h; do
 done; done
 
 # 2. Рыночные ряды. funding доступен за всю историю; OI/LS Binance отдаёт
-#    только за последние ~30 дней, поэтому они качаются отдельным окном (REG-4).
-#    Неполное покрытие — код возврата 1, а не «wrote N rows» (REG-5).
+#    только за последние 30 дней: диапазон за их пределами урезается с явным
+#    сообщением (REG-4), а неполное покрытие даёт код возврата 1 (REG-5).
+#    Историю OI/LS накапливает регулярный сбор — см. раздел ниже.
 for s in BTCUSDT ETHUSDT SOLUSDT; do for tf in 1h 4h; do
   trading-research fetch-market-data --symbol $s --timeframe $tf \
     --start 2022-01-01 --end 2026-10-01 --series funding
@@ -238,5 +239,5 @@ MVP: `INF-1..3 → DATA-1..6 → BT-1..8 → EXP-1..6 → AN-1..4`; далее
 E5 (walk-forward) → E6 (market regimes) → E7 (первый реальный прогон)
 → E8 (эксплуатация данных).
 
-Текущий фронт: `REG-4` (покрытие фич и кламп в разовой загрузке), `DATA-8`,
-`DATA-7` (проверяемое наполнение базы) → `RUN-9`, `RUN-8`.
+Текущий фронт: `DATA-8`, `DATA-7` (проверяемое наполнение базы) →
+`RUN-9`, `RUN-8`.

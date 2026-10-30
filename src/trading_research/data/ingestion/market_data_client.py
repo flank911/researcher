@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import polars as pl
@@ -70,11 +70,58 @@ PERIOD_MS: dict[str, int] = {
     "1d": 24 * 60 * 60_000,
 }
 
+# Окно доступности /futures/data/* (OI и LS). Замерено на живом API 2026-10-30
+# для обоих эндпоинтов: startTime за 25, 28 и 29 дней назад отвечает, за 30, 31,
+# 32, 35 и 40 — `-1130 parameter 'startTime' is invalid`. У funding окна нет,
+# его история доступна целиком.
+RETENTION = timedelta(days=30)
+# Кламп идёт с суточным запасом: без него запрос у самой границы окна падал бы
+# случайным образом — из-за расхождения часов и времени самого запроса.
+SAFE_RETENTION = timedelta(days=29)
+
+# Код Binance для startTime за пределами окна retention. Это не пустой ответ и не
+# общая ошибка параметра — по нему и опознаётся выход за окно.
+RETENTION_ERROR_CODE = -1130
+
 
 def _to_ms(dt: datetime) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return int(dt.timestamp() * 1000)
+
+
+class RetentionWindowError(BinanceAPIError):
+    """``startTime`` за пределами окна доступности ``/futures/data/*``.
+
+    Отдельный тип, а не сырой ``BinanceAPIError``: по тексту ``parameter
+    'startTime' is invalid`` невозможно догадаться, что речь про 30-дневное окно
+    и что история этих рядов добывается только регулярным сбором. Вызывающая
+    сторона при этом может отличить выход за окно от прочих ошибок API.
+    """
+
+    def __init__(self, status: int, body: str, *, series: str) -> None:
+        # В обход ``BinanceAPIError.__init__``: он обрезает тело до 200 символов,
+        # то есть срезал бы как раз объяснение, ради которого этот тип и нужен.
+        RuntimeError.__init__(
+            self,
+            f"{series}: Binance отдаёт этот ряд только за последние "
+            f"{RETENTION.days} дней, а запрошенное начало окна за его пределами "
+            f"(код {RETENTION_ERROR_CODE}). Запрашивайте окно в пределах "
+            f"{SAFE_RETENTION.days} дней; историю за весь диапазон даёт только "
+            f"регулярный сбор — команда update-market-data. "
+            f"Для funding ограничения нет: --series funding. Ответ API: {body[:200]}",
+        )
+        self.status = status
+        self.body = body
+
+
+def _is_retention_error(body: str) -> bool:
+    """Отличить выход за окно retention от прочих ошибок 400."""
+    try:
+        payload = json.loads(body)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(payload, dict) and payload.get("code") == RETENTION_ERROR_CODE
 
 
 def _period_ms(period: str) -> int:
@@ -250,7 +297,15 @@ class BinanceMarketDataClient:
         window_start = start_ms
         while window_start < end_ms:
             window_end = min(window_start + span_ms, end_ms)
-            rows.extend(self._fetch_batch(url, base_params, window_start, window_end, limit))
+            try:
+                batch = self._fetch_batch(url, base_params, window_start, window_end, limit)
+            except BinanceAPIError as error:
+                if not _is_retention_error(error.body):
+                    raise
+                raise RetentionWindowError(
+                    error.status, error.body, series=path.rsplit("/", 1)[-1]
+                ) from error
+            rows.extend(batch)
             window_start = window_end
         return rows
 
@@ -321,4 +376,11 @@ class BinanceMarketDataClient:
         )
 
 
-__all__ = ["PERIOD_MS", "BinanceMarketDataClient"]
+__all__ = [
+    "PERIOD_MS",
+    "RETENTION",
+    "RETENTION_ERROR_CODE",
+    "SAFE_RETENTION",
+    "BinanceMarketDataClient",
+    "RetentionWindowError",
+]
