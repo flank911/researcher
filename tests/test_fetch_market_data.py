@@ -117,6 +117,10 @@ def _run(root: Path, fetcher: _StubFetcher, **kw: object) -> dict[str, SeriesCov
         "fetcher": fetcher,
     }
     params.update(kw)
+    # REG-4 урезает начало окна доступностью ряда у биржи, поэтому «сейчас» нужно
+    # задать: иначе окна этих тестов (2024 год) окажутся старше окна retention и
+    # проверяться будет кламп, а не то, ради чего тест написан.
+    params.setdefault("now", params["end"])
     return fetch_market_data(**params)  # type: ignore[arg-type]
 
 
@@ -251,6 +255,9 @@ def test_cli_fetch_market_data_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "trading_research.cli.fetch_market_data.BinanceMarketDataClient",
         lambda: _StubFetcher(),
     )
+    monkeypatch.setattr(
+        "trading_research.cli.fetch_market_data._now", lambda: T0 + timedelta(days=1)
+    )
     root = tmp_path / "raw"
     result = runner.invoke(
         app,
@@ -281,6 +288,9 @@ def test_cli_single_series(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         "trading_research.cli.fetch_market_data.BinanceMarketDataClient",
         lambda: _StubFetcher(),
+    )
+    monkeypatch.setattr(
+        "trading_research.cli.fetch_market_data._now", lambda: T0 + timedelta(days=1)
     )
     root = tmp_path / "raw"
     result = runner.invoke(
@@ -423,6 +433,9 @@ def test_describe_coverage_wording(tmp_path: Path) -> None:
 def _invoke_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fetcher: _StubFetcher, **kw: str):
     monkeypatch.setattr(
         "trading_research.cli.fetch_market_data.BinanceMarketDataClient", lambda: fetcher
+    )
+    monkeypatch.setattr(
+        "trading_research.cli.fetch_market_data._now", lambda: T0 + timedelta(days=1)
     )
     args = {
         "--symbol": "BTCUSDT",

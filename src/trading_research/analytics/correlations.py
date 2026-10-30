@@ -5,11 +5,18 @@
 параметров связана с фичами режима (volatility / trend / funding / OI / LS) и с
 дискретной меткой ``regime_label``. Отвечает на вопросы вида «какие параметры лучше
 при высокой волатильности / в бычьем тренде / при перегретом funding».
+
+**REG-4 — ``null`` в матрице двусмыслен.** ``pl.corr`` отдаёт ``null`` и когда связи
+нет, и когда коррелировать нечего: столбец пуст или в нём одна точка. Для читателя
+это разные ответы — «проверили, связи нет» против «не проверяли». Поэтому рядом с
+матрицей считается ``regime_feature_availability``, и команда печатает, по каким
+фичам данных не было вовсе.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import polars as pl
 
@@ -70,6 +77,72 @@ def regime_correlations(
     return joined.group_by(by).agg(exprs).sort(by)
 
 
+@dataclass(frozen=True)
+class FeatureAvailability:
+    """Сколько строк склеенной таблицы несут значение фичи режима.
+
+    Нужна, чтобы отличать «данных нет» от «связи нет» (REG-4): `pl.corr` по
+    пустому столбцу даёт `null` — ровно то же, что корреляция, которой не
+    существует. На прогоне RUN-7 `oi_change_pct` и `ls_ratio_avg` были пусты
+    целиком, а в матрице выглядели как честно посчитанный `NaN`.
+    """
+
+    feature: str
+    filled: int
+    total: int
+
+    @property
+    def is_missing(self) -> bool:
+        """Данных нет вовсе — `null` в матрице означает не «связи нет»."""
+        return self.filled == 0
+
+    @property
+    def is_constant(self) -> bool:
+        """Данные есть, но корреляция всё равно будет `null`.
+
+        Второй источник `null`, который легко принять за отсутствие связи:
+        на одной точке корреляция не определена.
+        """
+        return self.filled == 1
+
+
+def regime_feature_availability(
+    joined: pl.DataFrame, *, features: Sequence[str] | None = None
+) -> list[FeatureAvailability]:
+    """Заполненность каждой фичи режима в склеенной таблице."""
+    feats = (
+        list(features)
+        if features is not None
+        else [c for c in NUMERIC_REGIME_FEATURES if c in joined.columns]
+    )
+    total = joined.height
+    return [
+        FeatureAvailability(feature=f, filled=total - joined[f].null_count(), total=total)
+        for f in feats
+    ]
+
+
+def describe_availability(availability: list[FeatureAvailability]) -> list[str]:
+    """Строки под матрицей корреляций: где `null` значит «данных не было»."""
+    missing = [a.feature for a in availability if a.is_missing]
+    constant = [a.feature for a in availability if a.is_constant]
+    if not missing and not constant:
+        return ["данные есть по всем фичам режима: null в матрице — это отсутствие связи"]
+
+    lines = []
+    if missing:
+        lines.append(
+            f"ДАННЫХ НЕТ по фичам: {', '.join(missing)} — "
+            f"null у них означает «нечего коррелировать», а не «связи нет»"
+        )
+    if constant:
+        lines.append(f"одна точка по фичам: {', '.join(constant)} — корреляция не определена")
+    filled = [a for a in availability if not a.is_missing]
+    if filled:
+        lines.append("заполнено: " + ", ".join(f"{a.feature} {a.filled}/{a.total}" for a in filled))
+    return lines
+
+
 def regime_metric_summary(
     joined: pl.DataFrame,
     *,
@@ -110,6 +183,9 @@ def best_params_in_regime(
 
 __all__ = [
     "NUMERIC_REGIME_FEATURES",
+    "FeatureAvailability",
+    "describe_availability",
+    "regime_feature_availability",
     "attach_regime_features",
     "best_params_in_regime",
     "regime_correlations",

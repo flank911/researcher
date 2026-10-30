@@ -38,7 +38,13 @@ import polars as pl
 
 from trading_research.data.ingestion.market_data_client import (
     PERIOD_MS,
+    SAFE_RETENTION,
     BinanceMarketDataClient,
+)
+from trading_research.data.schema import (
+    FUNDING_SCHEMA,
+    LONG_SHORT_RATIO_SCHEMA,
+    OPEN_INTEREST_SCHEMA,
 )
 from trading_research.data.storage.parquet_store import (
     FUNDING,
@@ -65,6 +71,12 @@ SERIES_PERIODS: tuple[str, ...] = tuple(PERIOD_MS)
 
 _PERIODIC = (SeriesKind.OPEN_INTEREST, SeriesKind.LONG_SHORT_RATIO)
 
+_SCHEMAS = {
+    SeriesKind.FUNDING: FUNDING_SCHEMA,
+    SeriesKind.OPEN_INTEREST: OPEN_INTEREST_SCHEMA,
+    SeriesKind.LONG_SHORT_RATIO: LONG_SHORT_RATIO_SCHEMA,
+}
+
 
 class CoverageStatus(StrEnum):
     """Насколько загруженный ряд покрывает запрошенное окно."""
@@ -74,6 +86,10 @@ class CoverageStatus(StrEnum):
     # Период задаёт биржа (funding) — ожидаемое число точек посчитать не из чего,
     # поэтому про полноту честнее молчать, чем отвечать «полное».
     UNVERIFIED = "unverified"
+    # Весь запрошенный диапазон старше окна доступности. Это не дефект загрузки:
+    # у биржи этих данных нет и не будет, поэтому и не ошибка — но и не успех,
+    # и смешивать это с «покрытие неполное» нельзя.
+    OUT_OF_WINDOW = "out_of_window"
 
 
 @dataclass(frozen=True)
@@ -81,6 +97,8 @@ class SeriesCoverage:
     """Что фактически загружено по одному ряду за окно ``[start, end)``.
 
     ``expected`` — ожидаемое число точек; ``None`` для рядов без своего периода.
+    Окно может быть урезано доступностью ряда у биржи — тогда ``start`` больше
+    ``asked_start``, см. ``is_clamped``.
     """
 
     rows: int
@@ -88,11 +106,27 @@ class SeriesCoverage:
     last: datetime | None
     expected: int | None
     start: datetime
+    """Фактическое начало окна — после клампа окном retention."""
+    asked_start: datetime
+    """Начало, которое запросил пользователь, — до клампа."""
     end: datetime
     period: timedelta | None
 
     @property
+    def is_clamped(self) -> bool:
+        """Окно урезано доступностью ряда у биржи (REG-4).
+
+        Полное покрытие урезанного окна — не то же, что покрытие запрошенного:
+        первое говорит «загружено всё, что есть», второе — «загружено всё, что
+        просили». Молчать про разницу нельзя, но и считать её дефектом тоже:
+        недоступное у биржи не дефект загрузки.
+        """
+        return self.start > self.asked_start
+
+    @property
     def status(self) -> CoverageStatus:
+        if self.start >= self.end:
+            return CoverageStatus.OUT_OF_WINDOW
         if self.expected is None or self.period is None:
             return CoverageStatus.UNVERIFIED
         if self.rows < self.expected or self.missing_head or self.missing_tail:
@@ -155,6 +189,7 @@ def fetch_market_data(
     series: SeriesKind = SeriesKind.ALL,
     data_root: str | Path,
     fetcher: MarketDataFetcher | None = None,
+    now: datetime | None = None,
 ) -> dict[str, SeriesCoverage]:
     """Загрузить выбранные ряды за ``[start, end)`` и записать в Parquet-store.
 
@@ -162,6 +197,11 @@ def fetch_market_data(
     строк не отличает полную загрузку от потерянного начала диапазона (REG-5).
     Запись идемпотентна (``write_series`` делает upsert по ``open_time``, как и для
     свечей). ``fetcher=None`` → реальный клиент Binance USDT-M futures.
+
+    Начало окна для OI/LS урезается доступностью ряда у биржи (REG-4): без этого
+    исторический диапазон уходит в заведомый ``-1130``, причём ``--series all``
+    падает целиком — funding успевает записаться, а два остальных ряда нет.
+    Урезание видно в ``SeriesCoverage.is_clamped``, а не только в выводе.
 
     Raises:
         ValueError: ``timeframe`` не поддерживается Binance для OI/LS.
@@ -171,10 +211,31 @@ def fetch_market_data(
 
     fetcher = fetcher or BinanceMarketDataClient()
     store = ParquetStore(data_root)
+    # Границы приходят из Typer наивными; кламп отдаёт UTC-aware. Приводим обе
+    # сразу, иначе загрузчик сравнивает наивное с aware и падает TypeError —
+    # причём только на том ряде, который не клампится.
+    now = _as_utc(now or _now())
+    start, end = _as_utc(start), _as_utc(end)
     written: dict[str, SeriesCoverage] = {}
 
     for kind in wanted:
-        frame = _fetch_one(fetcher, kind, symbol=symbol, start=start, end=end, period=timeframe)
+        effective_start = clamp_to_retention(start, kind=kind, now=now)
+        if effective_start >= _as_utc(end):
+            # Весь диапазон старше окна доступности: запрашивать нечего, и запрос
+            # ушёл бы в ValueError «end must be after start» — сообщение, по
+            # которому про окно retention не догадаться.
+            written[kind.value] = _coverage(
+                _empty_like(kind),
+                kind,
+                start=effective_start,
+                asked_start=start,
+                end=end,
+                period=timeframe,
+            )
+            continue
+        frame = _fetch_one(
+            fetcher, kind, symbol=symbol, start=effective_start, end=end, period=timeframe
+        )
         store.write_series(
             kind.value,
             frame,
@@ -183,9 +244,27 @@ def fetch_market_data(
             symbol=symbol,
             timeframe=timeframe,
         )
-        written[kind.value] = _coverage(frame, kind, start=start, end=end, period=timeframe)
+        written[kind.value] = _coverage(
+            frame, kind, start=effective_start, asked_start=start, end=end, period=timeframe
+        )
 
     return written
+
+
+def clamp_to_retention(start: datetime, *, kind: SeriesKind, now: datetime) -> datetime:
+    """Урезать начало окна доступностью ряда у биржи (REG-4).
+
+    Выбран кламп, а не ошибка: при ``--series all`` на историческом диапазоне
+    команда должна загрузить funding за всю историю и OI/LS за доступное окно, а
+    не падать на втором ряде из трёх.
+
+    Публичная, потому что та же граница нужна регулярному сбору (OPS-1): он
+    решает по ней, какая часть истории уже невосполнима. Две копии этой формулы
+    разъехались бы молча — расхождение проявилось бы только на краю окна.
+    """
+    if kind not in _PERIODIC:
+        return _as_utc(start)
+    return max(_as_utc(start), now - SAFE_RETENTION)
 
 
 def _coverage(
@@ -193,6 +272,7 @@ def _coverage(
     kind: SeriesKind,
     *,
     start: datetime,
+    asked_start: datetime,
     end: datetime,
     period: str,
 ) -> SeriesCoverage:
@@ -204,10 +284,12 @@ def _coverage(
     """
     # Границы приходят из Typer наивными (``--start 2024-01-01``), а время в
     # загруженном ряде — UTC-aware; без приведения сравнение краёв падает.
-    start, end = _as_utc(start), _as_utc(end)
+    start, end, asked_start = _as_utc(start), _as_utc(end), _as_utc(asked_start)
 
     period_delta = timedelta(milliseconds=PERIOD_MS[period]) if kind in _PERIODIC else None
-    expected = int((end - start) / period_delta) if period_delta else None
+    # max(0, …): на диапазоне целиком вне окна start уезжает за end, и без этого
+    # «ожидалось» получилось бы отрицательным.
+    expected = max(0, int((end - start) / period_delta)) if period_delta else None
     times = frame["open_time"].to_list() if frame.height else []
     return SeriesCoverage(
         rows=frame.height,
@@ -215,6 +297,7 @@ def _coverage(
         last=times[-1] if times else None,
         expected=expected,
         start=start,
+        asked_start=asked_start,
         end=end,
         period=period_delta,
     )
@@ -223,6 +306,11 @@ def _coverage(
 def _as_utc(moment: datetime) -> datetime:
     """Наивное время трактуется как UTC — так же, как в загрузчике (``_to_ms``)."""
     return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
+
+
+def _now() -> datetime:
+    """Текущее время одной точкой — её подменяют тесты про окно retention."""
+    return datetime.now(UTC)
 
 
 def _validate_period(wanted: list[SeriesKind], timeframe: str) -> None:
@@ -238,6 +326,11 @@ def _validate_period(wanted: list[SeriesKind], timeframe: str) -> None:
             f"timeframe {timeframe!r} is not a valid Binance period for {', '.join(periodic)}; "
             f"supported: {', '.join(SERIES_PERIODS)}"
         )
+
+
+def _empty_like(kind: SeriesKind) -> pl.DataFrame:
+    """Пустой фрейм со схемой ряда — когда запрашивать нечего."""
+    return pl.DataFrame(schema=_SCHEMAS[kind])
 
 
 def _fetch_one(
@@ -266,11 +359,30 @@ def describe_coverage(name: str, symbol: str, timeframe: str, coverage: SeriesCo
     """
     head = f"{name} {symbol} {timeframe}:"
     window = f"{_fmt(coverage.first)} … {_fmt(coverage.last)}"
+    # Про урезанное окно говорится до статуса покрытия: «покрытие полное» на
+    # урезанном окне без этой оговорки читается как «загружено всё, что просили».
+    clamp = (
+        f" ОКНО УРЕЗАНО: просили с {_fmt(coverage.asked_start)}, "
+        f"биржа отдаёт только {SAFE_RETENTION.days} дней, "
+        f"поэтому начало сдвинуто на {_fmt(coverage.start)}."
+        if coverage.is_clamped
+        else ""
+    )
 
+    if coverage.status is CoverageStatus.OUT_OF_WINDOW:
+        return (
+            f"{head} НЕТ ДАННЫХ — весь запрошенный диапазон "
+            f"({_fmt(coverage.asked_start)} … {_fmt(coverage.end)}) старше окна "
+            f"доступности в {SAFE_RETENTION.days} дней. Биржа эту историю не отдаёт; "
+            f"накопить её может только регулярный сбор (update-market-data)."
+        )
     if coverage.status is CoverageStatus.UNVERIFIED:
-        return f"{head} {coverage.rows} rows, {window} (период задаёт биржа, покрытие не сверяется)"
+        return (
+            f"{head} {coverage.rows} rows, {window} "
+            f"(период задаёт биржа, покрытие не сверяется){clamp}"
+        )
     if coverage.status is CoverageStatus.COMPLETE:
-        return f"{head} {coverage.rows} rows, {window}, покрытие полное"
+        return f"{head} {coverage.rows} rows, {window}, покрытие полное{clamp}"
 
     missing = [
         part
@@ -281,7 +393,7 @@ def describe_coverage(name: str, symbol: str, timeframe: str, coverage: SeriesCo
     return (
         f"{head} ПОКРЫТИЕ НЕПОЛНОЕ — {coverage.rows} из {coverage.expected} точек, "
         f"получено {window}, запрошено {_fmt(coverage.start)} … {_fmt(coverage.end)}{edges}. "
-        f"Записано то, что получено."
+        f"Записано то, что получено.{clamp}"
     )
 
 
@@ -292,6 +404,7 @@ def _fmt(moment: datetime | None) -> str:
 __all__ = [
     "SERIES_PERIODS",
     "CoverageStatus",
+    "clamp_to_retention",
     "MarketDataFetcher",
     "SeriesCoverage",
     "SeriesKind",

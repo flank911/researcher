@@ -15,10 +15,18 @@ REG-2 умеет считать вектор фич режима (`build_time_sl
 ``SliceFeatures``. Нюанс реализации — ``read_series`` на пустом store возвращает
 DataFrame **без колонок**, а REG-2 фильтрует такой ряд по ``open_time`` и падает с
 ``ColumnNotFoundError``; поэтому отсутствие данных нормализуется в ``None``.
+
+**REG-4 — покрытие фич.** Устойчивость к отсутствию рядов имеет цену: команда
+отрабатывала с кодом 0 и ничего не говорила, когда фича выходила пустой целиком.
+На прогоне RUN-7 так и вышло — ``oi_change_pct`` и ``ls_ratio_avg`` были 114 null
+из 114, и обнаружилось это только при чтении корреляций. Поэтому ``feature_coverage``
+считает заполненность каждой фичи, а команда её печатает: пустая фича должна быть
+видна там, где она возникла, а не через два шага пайплайна.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import polars as pl
@@ -40,6 +48,8 @@ from trading_research.features.market_regime import (
 
 FEATURES_FILE = "time_slice_features.parquet"
 _TIME_COL = "open_time"
+# Ключи строки таблицы — не фичи, их заполненность считать нечего.
+_KEY_COLUMNS = ("symbol", "timeframe", "time_slice_id")
 
 
 def build_features_from_config(
@@ -133,6 +143,63 @@ def read_series_or_none(
     return frame
 
 
+@dataclass(frozen=True)
+class FeatureCoverage:
+    """Заполненность одной фичи режима по таблице ``time_slice_features``."""
+
+    feature: str
+    filled: int
+    total: int
+
+    @property
+    def is_empty(self) -> bool:
+        """Фича пуста целиком — данных для неё не было ни по одному слайсу."""
+        return self.filled == 0
+
+    @property
+    def is_partial(self) -> bool:
+        return 0 < self.filled < self.total
+
+    @property
+    def pct(self) -> float:
+        return 100.0 * self.filled / self.total if self.total else 0.0
+
+
+def feature_coverage(table: pl.DataFrame) -> list[FeatureCoverage]:
+    """Сколько слайсов заполнено по каждой фиче режима.
+
+    Считается по всем колонкам схемы, кроме ключей (``symbol``, ``timeframe``,
+    ``time_slice_id``): пустым может оказаться и ``regime_label``, если не хватило
+    входных данных для классификации.
+    """
+    features = [c for c in TIME_SLICE_FEATURE_COLUMNS if c not in _KEY_COLUMNS]
+    total = table.height
+    return [
+        FeatureCoverage(feature=name, filled=total - table[name].null_count(), total=total)
+        for name in features
+        if name in table.columns
+    ]
+
+
+def describe_feature_coverage(coverage: list[FeatureCoverage]) -> list[str]:
+    """Строки отчёта о покрытии — пустые и частичные фичи названы отдельно."""
+    # Пустая таблица — один отказ, а не десять пустых фич: перечислять их значило
+    # бы выдать одну проблему за десять.
+    if not coverage or coverage[0].total == 0:
+        return ["покрытие фич: таблица пуста — ни одного слайса"]
+
+    lines = [
+        f"  {c.feature}: {c.filled}/{c.total} слайсов ({c.pct:.0f}%)"
+        + ("  ← ПУСТО" if c.is_empty else "")
+        for c in coverage
+    ]
+    empty = [c.feature for c in coverage if c.is_empty]
+    header = f"покрытие фич ({coverage[0].total} слайсов):"
+    if empty:
+        header += f" пустых — {len(empty)}: {', '.join(empty)}"
+    return [header, *lines]
+
+
 def features_path(features_root: str | Path, experiment: str) -> Path:
     """Путь к таблице фич эксперимента (для читателей — RUN-5)."""
     return Path(features_root) / experiment / FEATURES_FILE
@@ -140,7 +207,10 @@ def features_path(features_root: str | Path, experiment: str) -> Path:
 
 __all__ = [
     "FEATURES_FILE",
+    "FeatureCoverage",
     "build_features_from_config",
+    "describe_feature_coverage",
+    "feature_coverage",
     "features_path",
     "read_series_or_none",
 ]
