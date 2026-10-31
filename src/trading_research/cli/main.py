@@ -35,6 +35,18 @@ from trading_research.cli.fetch_market_data import (
 )
 from trading_research.cli.plot_heatmap import plot_experiment_heatmap
 from trading_research.cli.run_experiment import run_experiment_from_config
+from trading_research.cli.update_data import (
+    describe_total as describe_candle_total,
+)
+from trading_research.cli.update_data import (
+    describe_update as describe_candle_update,
+)
+from trading_research.cli.update_data import (
+    has_defects as has_candle_defects,
+)
+from trading_research.cli.update_data import (
+    update_data_from_config,
+)
 from trading_research.cli.update_market_data import (
     describe_total,
     describe_update,
@@ -137,6 +149,23 @@ def fetch_market_data_cmd(
     # Неполное покрытие — не успех: молчаливый код 0 здесь и сделал REG-5
     # незаметным на целом прогоне. Данные при этом записаны, см. вывод выше.
     if any(c.status is CoverageStatus.INCOMPLETE for c in written.values()):
+        raise typer.Exit(code=1)
+
+
+@app.command("update-data")
+def update_data_cmd(
+    config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+) -> None:
+    """Догрузить свечи от последнего сохранённого бара до текущего (OPS-2)."""
+    updates = update_data_from_config(config, data_root=data_root)
+    for update in updates:
+        typer.echo(describe_candle_update(update))
+    typer.echo(describe_candle_total(updates))
+
+    # Недобор на догрузке хвоста — дырка в свежей истории. Код возврата нужен,
+    # чтобы расписание не отчитывалось об успехе там, где данных не хватает.
+    if has_candle_defects(updates):
         raise typer.Exit(code=1)
 
 
