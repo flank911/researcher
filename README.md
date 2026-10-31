@@ -29,15 +29,15 @@ ExperimentRun = Strategy + StrategyParams + Symbol + Timeframe
 
 ## Состояние
 
-Платформа счётно готова и проверена на реальной истории: 541 тест, `ruff`, `mypy`
+Платформа счётно готова и проверена на реальной истории: 558 тестов, `ruff`, `mypy`
 зелёные. Первое исследование проведено — BTCUSDT / ETHUSDT / SOLUSDT × 1h / 4h,
 2022-01-01 … 2026-10-01, отчёт в
 [`notebooks/004_first_research.ipynb`](notebooks/004_first_research.ipynb).
 
-В `data/` лежит 156 060 свечей и 31 902 строки funding за весь диапазон. Свечи и
-funding можно наполнять дальше уже сейчас — запись идемпотентна, а качество
-проверяется из CLI командой `validate-data` (`DATA-8`): на всей загруженной
-истории дефектов нет. Open interest и long/short ratio грузятся целиком
+В `data/` лежит 158 790 свечей и 31 902 строки funding за весь диапазон. Свечи и
+funding наполняются дальше одной командой: `update-data` (`OPS-2`) догружает
+только хвост от последнего сохранённого бара, а качество проверяется из CLI
+командой `validate-data` (`DATA-8`): на всей загруженной истории дефектов нет. Open interest и long/short ratio грузятся целиком
 (`REG-5` закрыт), а поскольку Binance отдаёт их лишь за 30 дней, их историю
 накапливает регулярный сбор — см. «Регулярный сбор рыночных рядов». Подробно —
 [`tickets/README.md`](tickets/README.md).
@@ -63,8 +63,9 @@ src/trading_research/
   experiments/orchestrator, runner, grid/random search, time_splitters,
               cache, parallel, results_store, walk_forward, holdout
   analytics/  queries, stability, correlations, plots
-  cli/        main, fetch_data, fetch_market_data, update_market_data,
-              validate_data, build_features, run_experiment, walk_forward,
+  cli/        main, fetch_data, fetch_market_data, update_data,
+              update_market_data, validate_data, build_features,
+              run_experiment, walk_forward,
               analyze_results, analyze_regimes, export_results, plot_heatmap,
               text (общее форматирование вывода)
 notebooks/    исследовательские ноутбуки
@@ -75,18 +76,24 @@ tickets/      план работ (по эпикам E0..E8)
 
 ## Пайплайн
 
-Полный прогон исследования — девять шагов, все из корня репозитория в
+Полный прогон исследования — десять шагов, все из корня репозитория в
 активированном venv. Числа в комментариях — замеры на Apple Silicon, 14 ядер,
-конфиг `ma_cross_multi_1h_4h` (прогон RUN-7; шаг 8 — после ускорения RUN-8).
+конфиг `ma_cross_multi_1h_4h` (прогон RUN-7; шаг 9 — после ускорения RUN-8).
 
 ```bash
-# 1. OHLCV — 3 символа × 2 таймфрейма (87 с, 156 060 свечей)
+# 1. OHLCV — 3 символа × 2 таймфрейма (87 с, 156 060 свечей). Это первая
+#    загрузка; добивать базу до сегодня — шагом 2.
 for s in BTCUSDT ETHUSDT SOLUSDT; do for tf in 1h 4h; do
   trading-research fetch-data --symbol $s --timeframe $tf \
     --start 2022-01-01 --end 2026-10-01
 done; done
 
-# 2. Рыночные ряды. funding доступен за всю историю; OI/LS Binance отдаёт
+# 2. Догрузка свечей от последнего сохранённого бара до текущего (OPS-2).
+#    Запрашивается только хвост: месяц по 6 парам — 4,4 с против 87 с полной
+#    перекачки; повторный прогон без новых данных в API не ходит вовсе.
+trading-research update-data --config configs/experiments/ma_cross_multi_1h_4h.yaml
+
+# 3. Рыночные ряды. funding доступен за всю историю; OI/LS Binance отдаёт
 #    только за последние 30 дней: диапазон за их пределами урезается с явным
 #    сообщением (REG-4), а неполное покрытие даёт код возврата 1 (REG-5).
 #    Историю OI/LS накапливает регулярный сбор — см. раздел ниже.
@@ -99,27 +106,27 @@ for s in BTCUSDT ETHUSDT SOLUSDT; do for tf in 1h 4h; do
   done
 done; done
 
-# 3. Проверка качества загруженного: пропуски, дубли, монотонность, OHLC,
+# 4. Проверка качества загруженного: пропуски, дубли, монотонность, OHLC,
 #    выбросы — по свечам и по рядам funding/OI/LS. JSON-отчёты в data/reports/.
 #    --strict даёт код 1 при дефектах: так шаг можно ставить перед прогоном.
 trading-research validate-data --config configs/experiments/ma_cross_multi_1h_4h.yaml \
   --strict
 
-# 4. Фичи режима по слайсам
+# 5. Фичи режима по слайсам
 trading-research build-features --config configs/experiments/ma_cross_multi_1h_4h.yaml
 
-# 5. Сетка по слайсам (4.7 с на 14 воркерах, resume/dedupe по run_hash)
+# 6. Сетка по слайсам (4.7 с на 14 воркерах, resume/dedupe по run_hash)
 trading-research run-experiment --config configs/experiments/ma_cross_multi_1h_4h.yaml
 
-# 6. Ранжирование и stability
+# 7. Ранжирование и stability
 trading-research analyze-results --experiment ma_cross_multi --metric sharpe --top 6
 trading-research export-results --experiment ma_cross_multi --kind stability --metric sharpe
 
-# 7. Карты параметров
+# 8. Карты параметров
 trading-research plot-heatmap --experiment ma_cross_multi --x fast_ma --y slow_ma \
   --metric sharpe --agg median
 
-# 8. Честный OOS + untouched holdout (3.3 с на 8 воркерах, 270 фолдов). По
+# 9. Честный OOS + untouched holdout (3.3 с на 8 воркерах, 270 фолдов). По
 #    каждой паре — строка holdout: research vs резерв, деградация, сделки и
 #    пометка ненадёжного результата; отсутствие holdout объяснено, а не
 #    умолчано (RUN-9). --workers 0 берёт число ядер; результат от числа
@@ -127,22 +134,22 @@ trading-research plot-heatmap --experiment ma_cross_multi --x fast_ma --y slow_m
 trading-research walk-forward --config configs/experiments/ma_cross_multi_1h_4h.yaml \
   --workers 8
 
-# 9. Корреляции параметры ↔ режим
+# 10. Корреляции параметры ↔ режим
 trading-research analyze-regimes --experiment ma_cross_multi --metric sharpe
 ```
 
-Результаты шага 5 и далее складываются в `data/results/<experiment>/`:
+Результаты шага 6 и далее складываются в `data/results/<experiment>/`:
 `performance.parquet` (пер-слайс метрики), `catalog.sqlite` (runs + run_metrics),
 `wf/<symbol>/<timeframe>/` (выборы по фолдам, OOS equity, `holdout_report.json`).
 
 Шаги 6–9 читают уже посчитанное, поэтому их можно гонять повторно без пересчёта.
 Шаг 8 считает всё сам и в кэш результатов не смотрит — это осознанно: honest OOS
-не имеет права видеть сетку из шага 5.
+не имеет права видеть сетку из шага 6.
 
 ## Регулярный сбор рыночных рядов
 
 Свечи и funding доступны у Binance за всю историю — их можно догрузить когда
-угодно. Open interest и long/short ratio биржа отдаёт **только за последние
+угодно (`update-data` для свечей, `update-market-data --series funding`). Open interest и long/short ratio биржа отдаёт **только за последние
 30 дней** (замерено: 29 дней назад эндпоинт отвечает, 30 — уже `-1130`). Их
 история поэтому не загружается, а *создаётся* регулярным сбором: каждый день без
 сбора — день, которого в датасете не будет никогда.
@@ -175,6 +182,10 @@ launchctl load ~/Library/LaunchAgents/com.trading-research.update-market-data.pl
 launchd запускает при пробуждении ноутбука, календарную можно проспать). При окне
 биржи в 30 дней это большой запас — чтобы потерять данные, расписание должно
 молчать месяц.
+
+Агент собирает только рыночные ряды, потому что срочны именно они. Свечи по
+расписанию не нужны: они доступны за всю историю, и `update-data` догонит любой
+пропуск в любой момент. Если захочется и их — та же команда в том же plist.
 
 ### Как проверить, что расписание живо
 
@@ -252,5 +263,6 @@ MVP: `INF-1..3 → DATA-1..6 → BT-1..8 → EXP-1..6 → AN-1..4`; далее
 E5 (walk-forward) → E6 (market regimes) → E7 (первый реальный прогон)
 → E8 (эксплуатация данных).
 
-Текущий фронт: `OPS-2` (догрузка свечей от последнего бара) → расширение
-исследования (больше символов, сетка в сотни комбинаций, вторая стратегия).
+Текущий фронт: расширение исследования (больше символов, сетка в сотни
+комбинаций, вторая стратегия помимо `ma_cross`). Бэклог по эксплуатации данных
+пуст: и сбор OI/LS (`OPS-1`), и наполнение свечей (`OPS-2`) инкрементальны.
