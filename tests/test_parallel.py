@@ -15,7 +15,7 @@ import pytest
 from trading_research.domain import ExecutionModel, PositionSizeType, TimeSlice
 from trading_research.experiments.cache import RunLedger, RunSpec, build_run_specs
 from trading_research.experiments.parallel import (
-    _MP_CONTEXT,
+    MP_CONTEXT,
     execute_run_groups_parallel,
     execute_runs_parallel,
 )
@@ -259,7 +259,7 @@ def test_pool_never_forks() -> None:
     ребёнка навсегда (пул потоков rayon не переносится). Локально на macOS
     дефолт spawn, поэтому регрессию видно только в CI — ловим её здесь.
     """
-    assert _MP_CONTEXT.get_start_method() == "spawn"
+    assert MP_CONTEXT.get_start_method() == "spawn"
 
 
 # --- speedup ----------------------------------------------------------------

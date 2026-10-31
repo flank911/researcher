@@ -29,7 +29,7 @@ ExperimentRun = Strategy + StrategyParams + Symbol + Timeframe
 
 ## Состояние
 
-Платформа счётно готова и проверена на реальной истории: 530 тестов, `ruff`, `mypy`
+Платформа счётно готова и проверена на реальной истории: 541 тест, `ruff`, `mypy`
 зелёные. Первое исследование проведено — BTCUSDT / ETHUSDT / SOLUSDT × 1h / 4h,
 2022-01-01 … 2026-10-01, отчёт в
 [`notebooks/004_first_research.ipynb`](notebooks/004_first_research.ipynb).
@@ -76,8 +76,8 @@ tickets/      план работ (по эпикам E0..E8)
 ## Пайплайн
 
 Полный прогон исследования — девять шагов, все из корня репозитория в
-активированном venv. Числа в комментариях — замеры прогона RUN-7 (Apple Silicon,
-14 ядер, конфиг `ma_cross_multi_1h_4h`).
+активированном venv. Числа в комментариях — замеры на Apple Silicon, 14 ядер,
+конфиг `ma_cross_multi_1h_4h` (прогон RUN-7; шаг 8 — после ускорения RUN-8).
 
 ```bash
 # 1. OHLCV — 3 символа × 2 таймфрейма (87 с, 156 060 свечей)
@@ -119,10 +119,13 @@ trading-research export-results --experiment ma_cross_multi --kind stability --m
 trading-research plot-heatmap --experiment ma_cross_multi --x fast_ma --y slow_ma \
   --metric sharpe --agg median
 
-# 8. Честный OOS + untouched holdout (13 с, 270 фолдов). По каждой паре —
-#    строка holdout: research vs резерв, деградация, сделки и пометка
-#    ненадёжного результата; отсутствие holdout объяснено, а не умолчано (RUN-9).
-trading-research walk-forward --config configs/experiments/ma_cross_multi_1h_4h.yaml
+# 8. Честный OOS + untouched holdout (3.3 с на 8 воркерах, 270 фолдов). По
+#    каждой паре — строка holdout: research vs резерв, деградация, сделки и
+#    пометка ненадёжного результата; отсутствие holdout объяснено, а не
+#    умолчано (RUN-9). --workers 0 берёт число ядер; результат от числа
+#    воркеров не зависит (RUN-8).
+trading-research walk-forward --config configs/experiments/ma_cross_multi_1h_4h.yaml \
+  --workers 8
 
 # 9. Корреляции параметры ↔ режим
 trading-research analyze-regimes --experiment ma_cross_multi --metric sharpe
@@ -249,5 +252,5 @@ MVP: `INF-1..3 → DATA-1..6 → BT-1..8 → EXP-1..6 → AN-1..4`; далее
 E5 (walk-forward) → E6 (market regimes) → E7 (первый реальный прогон)
 → E8 (эксплуатация данных).
 
-Текущий фронт: `RUN-8` (производительность walk-forward) → `OPS-2`
-(догрузка свечей от последнего бара).
+Текущий фронт: `OPS-2` (догрузка свечей от последнего бара) → расширение
+исследования (больше символов, сетка в сотни комбинаций, вторая стратегия).

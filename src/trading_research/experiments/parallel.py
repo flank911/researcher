@@ -40,7 +40,11 @@ from trading_research.experiments.cache import RunLedger, RunSpec
 # потоков rayon в дочерний процесс не переносится, и первый же `collect()` виснет
 # в `LockLatch::wait_and_reset` навсегда. На macOS дефолт spawn, поэтому локально
 # это не воспроизводится — висит только CI.
-_MP_CONTEXT = multiprocessing.get_context("spawn")
+#
+# Имя публичное: тот же контекст нужен отбору на train в walk-forward (RUN-8), а
+# вторая копия этой строки означала бы второй шанс однажды получить fork и
+# неотлаживаемый зависший CI.
+MP_CONTEXT = multiprocessing.get_context("spawn")
 
 
 @dataclass(frozen=True)
@@ -77,7 +81,7 @@ def execute_runs_parallel(
     failed_hashes: list[str] = []
 
     if pending:
-        with ProcessPoolExecutor(max_workers=max_workers, mp_context=_MP_CONTEXT) as pool:
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=MP_CONTEXT) as pool:
             future_to_spec = {pool.submit(compute, spec): spec for spec in pending}
             for future in as_completed(future_to_spec):
                 spec = future_to_spec[future]
@@ -159,7 +163,7 @@ def execute_run_groups_parallel(
                 continue
             _mark(group)
     elif pending:
-        with ProcessPoolExecutor(max_workers=max_workers, mp_context=_MP_CONTEXT) as pool:
+        with ProcessPoolExecutor(max_workers=max_workers, mp_context=MP_CONTEXT) as pool:
             future_to_group = {pool.submit(compute_group, g): g for g in pending}
             for future in as_completed(future_to_group):
                 group = future_to_group[future]
@@ -180,4 +184,9 @@ def execute_run_groups_parallel(
     )
 
 
-__all__ = ["ParallelSummary", "execute_run_groups_parallel", "execute_runs_parallel"]
+__all__ = [
+    "MP_CONTEXT",
+    "ParallelSummary",
+    "execute_run_groups_parallel",
+    "execute_runs_parallel",
+]
