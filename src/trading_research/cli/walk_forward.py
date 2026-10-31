@@ -117,12 +117,16 @@ def walk_forward_from_config(
     *,
     data_root: str | Path,
     results_root: str | Path,
+    workers: int = 1,
 ) -> dict[tuple[str, str], PairOutcome]:
     """Прогнать walk-forward (и holdout, если задан) по конфигу.
 
     Возвращает итог по каждой паре ``(символ, таймфрейм)``, **включая пары, по
     которым прогон не состоялся** — с причиной в ``holdout_status`` (RUN-9).
     Артефакты пишутся в ``{results_root}/{experiment}/wf/{symbol}/{timeframe}/``.
+
+    ``workers`` — процессов на отбор параметров на train (RUN-8): ``1`` — в текущем
+    процессе, ``0`` — по числу ядер. На результат не влияет.
 
     RUN-6: таймфрейм входит и в ключ результата, и в путь артефактов — иначе прогоны
     одного символа на 1h и 4h перезаписывали бы друг друга.
@@ -192,6 +196,7 @@ def walk_forward_from_config(
                 cfg.execution,
                 timeframe,
                 select_by=wf.select_by,
+                workers=workers,
             )
             out_dir = out_root / symbol / timeframe
             _save_oos(result, out_dir)

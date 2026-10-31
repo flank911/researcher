@@ -237,9 +237,14 @@ def walk_forward_cmd(
     config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
     data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
     results_root: Path = typer.Option(Path("data/results"), help="Корень для результатов."),
+    workers: int = typer.Option(
+        1, help="Процессов на отбор параметров (1 — без пула, 0 — по числу ядер)."
+    ),
 ) -> None:
     """Прогнать walk-forward (честный OOS) и, если задан, holdout."""
-    outcomes = walk_forward_from_config(config, data_root=data_root, results_root=results_root)
+    outcomes = walk_forward_from_config(
+        config, data_root=data_root, results_root=results_root, workers=workers
+    )
     # Holdout печатается вместе с OOS, а его отсутствие — отдельной причиной:
     # главный результат исследования не должен жить только в JSON (RUN-9).
     for outcome in outcomes.values():
