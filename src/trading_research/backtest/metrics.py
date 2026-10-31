@@ -18,6 +18,12 @@ Annualization factor **явный** и выводится из таймфрей�
 Надёжность на малой выборке: при ``trades_count < min_trades`` результат помечается
 ``reliable=False`` — trade-зависимые метрики статистически ненадёжны и их следует
 трактовать с осторожностью (значения при этом сохраняются, не зануляются).
+
+Суммирование — только ``math.fsum`` (INF-8). Встроенный ``sum`` складывает слева
+направо на Python 3.11 и компенсированно (суммирование Нейтмайера) на 3.12+, так
+что одна и та же кривая капитала давала на поддерживаемых интерпретаторах разные
+последние биты ``sharpe``. ``math.fsum`` округляет точную сумму, то есть не зависит
+ни от версии, ни от сборки: метрика одного и того же прогона воспроизводима.
 """
 
 from __future__ import annotations
@@ -179,8 +185,8 @@ def _profit_factor(pnls: list[float]) -> float | None:
 
     ``None`` — если нет сделок или нет убыточных сделок (метрика не определена).
     """
-    gross_profit = sum(p for p in pnls if p > 0)
-    gross_loss = -sum(p for p in pnls if p < 0)
+    gross_profit = math.fsum(p for p in pnls if p > 0)
+    gross_loss = -math.fsum(p for p in pnls if p < 0)
     if not pnls or gross_loss == 0.0:
         return None
     return gross_profit / gross_loss
@@ -194,19 +200,19 @@ def _win_rate(pnls: list[float]) -> float | None:
 
 
 def _mean(values: list[float]) -> float:
-    return sum(values) / len(values)
+    return math.fsum(values) / len(values)
 
 
 def _stdev(values: list[float]) -> float:
     """Выборочное стандартное отклонение (ddof=1)."""
     n = len(values)
-    mean = sum(values) / n
-    var = sum((v - mean) ** 2 for v in values) / (n - 1)
+    mean = math.fsum(values) / n
+    var = math.fsum((v - mean) ** 2 for v in values) / (n - 1)
     return math.sqrt(var)
 
 
 def _downside_deviation(values: list[float]) -> float:
     """Отклонение вниз относительно нуля (ddof=1, нормировка на n-1)."""
     n = len(values)
-    downside_sq = sum(v**2 for v in values if v < 0)
+    downside_sq = math.fsum(v**2 for v in values if v < 0)
     return math.sqrt(downside_sq / (n - 1))

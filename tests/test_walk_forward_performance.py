@@ -179,6 +179,13 @@ def test_misaligned_equity_curve_raises_instead_of_silently_shifting() -> None:
 
 # Эталон снят прогоном реализации до оптимизации (коммит main перед RUN-8) на
 # фикстуре выше. Любое расхождение означает, что ускорение изменило цифры.
+#
+# Побитовая сверка здесь законна только потому, что метрики складывают через
+# ``math.fsum`` (INF-8): точно округлённая сумма одинакова на всех поддерживаемых
+# интерпретаторах. Со встроенным ``sum`` этот assert проверял версию питона —
+# на 3.11 сложение идёт слева направо, на 3.12+ компенсированно, и ``sharpe``
+# расходился в 13-м знаке при той же кривой капитала. Так тест и был красным на
+# 3.11 с момента мержа RUN-8.
 _EXPECTED_FOLDS = 19
 _EXPECTED_EQUITY_ROWS = 4560
 _EXPECTED_RETURN_PCT = 1290.5557116086459
@@ -195,6 +202,8 @@ def test_oos_result_matches_pre_optimization_reference() -> None:
     assert result.oos_equity.height == _EXPECTED_EQUITY_ROWS
     assert result.oos_equity.columns == ["open_time", "equity"]
     # Побитово, а не approx: ускорение не имеет права менять последний знак.
+    # Ослабить допуском было бы проще, но это сняло бы с теста ровно то, ради чего
+    # он написан, — чувствительность к составу окна в последних битах.
     assert result.oos_metrics.total_return_pct == _EXPECTED_RETURN_PCT
     assert result.oos_metrics.sharpe == _EXPECTED_SHARPE
     assert result.oos_metrics.max_drawdown_pct == _EXPECTED_MAX_DD_PCT
