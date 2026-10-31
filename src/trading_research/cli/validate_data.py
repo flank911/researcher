@@ -36,6 +36,7 @@ from pathlib import Path
 import polars as pl
 
 from trading_research.cli.fetch_market_data import SeriesKind, clamp_to_retention
+from trading_research.cli.text import plural
 from trading_research.config import load_experiment_config
 from trading_research.data.schema import TIMEFRAME_MS
 from trading_research.data.storage.duckdb_store import DuckDBStore
@@ -245,7 +246,7 @@ def describe_total(pairs: list[PairValidation], reports_root: Path | None = None
     if not pairs:
         return "проверять нечего: в конфиге нет пар"
     bad = [p for p in pairs if p.is_defect]
-    total = f"итого: {_plural(len(pairs), 'пара', 'пары', 'пар')}"
+    total = f"итого: {plural(len(pairs), 'пара', 'пары', 'пар')}"
     total += f", с дефектами: {len(bad)}" if bad else ", дефектов нет"
     if reports_root is not None:
         total += f", отчёты -> {reports_root}"
@@ -331,7 +332,7 @@ def _describe_check(check: DatasetCheck) -> str:
         return f"{head} {check.note}"
 
     unit = ("бар", "бара", "баров") if check.is_candles else ("точка", "точки", "точек")
-    parts = [head, _plural(check.rows, *unit)]
+    parts = [head, plural(check.rows, *unit)]
     defects = _defect_parts(check.report, unit)
     parts.append("— " + (", ".join(defects) if defects else "чисто"))
     if check.note:
@@ -352,7 +353,7 @@ def _defect_parts(
             if isinstance(report, ValidationReport)
             else report.missing_total
         )
-        parts.append(f"пропусков {len(report.gaps)} ({_plural(missing, *unit)})")
+        parts.append(f"пропусков {len(report.gaps)} ({plural(missing, *unit)})")
     if report.duplicate_times:
         parts.append(f"дублей {len(report.duplicate_times)}")
     if not report.is_monotonic:
@@ -377,18 +378,6 @@ def _defect_parts(
 
 def _report_path(out_dir: Path, symbol: str, timeframe: str, dataset: str) -> Path:
     return out_dir / f"{symbol}_{timeframe}_{dataset}.json"
-
-
-def _plural(count: int, one: str, few: str, many: str) -> str:
-    """«1 бар» / «3 бара» / «18 баров» — строку читают люди."""
-    tail, hundred = count % 10, count % 100
-    if tail == 1 and hundred != 11:
-        form = one
-    elif tail in (2, 3, 4) and hundred not in (12, 13, 14):
-        form = few
-    else:
-        form = many
-    return f"{count} {form}"
 
 
 def _as_utc(moment: datetime) -> datetime:
