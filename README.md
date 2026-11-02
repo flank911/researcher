@@ -26,10 +26,14 @@ ExperimentRun = Strategy + StrategyParams + Symbol + Timeframe
 - Движок: событийный bar-by-bar.
 - Research-режим: непрерывный прогон на всей истории + нарезка equity по `TimeSlice`.
 - Первая стратегия: MA Cross.
+- Вторая стратегия: возврат к среднему на RSI (`RES-1`) — взята не для
+  ассортимента, а как разделяющий эксперимент: трендследящая и
+  контртрендовая логики не могут ошибаться одинаково, поэтому их совпадающий
+  вывод указывает не на стратегию, а на платформу.
 
 ## Состояние
 
-Платформа счётно готова и проверена на реальной истории: 576 тестов, `ruff`, `mypy`
+Платформа счётно готова и проверена на реальной истории: 591 тест, `ruff`, `mypy`
 зелёные. Первое исследование проведено — BTCUSDT / ETHUSDT / SOLUSDT × 1h / 4h,
 2022-01-01 … 2026-10-01, отчёт в
 [`notebooks/004_first_research.ipynb`](notebooks/004_first_research.ipynb).
@@ -57,7 +61,7 @@ src/trading_research/
   hashing.py  канонический хэш и воспроизводимость
   data/       ingestion/, storage/, catalog, schema, validators
   features/   indicators, market_regime, funding/oi/ls_ratio features
-  strategies/ base, ma_cross
+  strategies/ base, ma_cross, rsi_reversion
   backtest/   engine, portfolio, position, orders, risk, fees, slippage,
               sizing, funding, metrics
   experiments/orchestrator, runner, grid/random search, time_splitters,

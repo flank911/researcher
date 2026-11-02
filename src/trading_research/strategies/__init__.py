@@ -3,7 +3,10 @@
 Импорт модулей стратегий регистрирует их в реестре ``base``.
 """
 
-from trading_research.strategies import ma_cross  # noqa: F401  (side-effect: register)
+from trading_research.strategies import (
+    ma_cross,  # noqa: F401  (side-effect: register)
+    rsi_reversion,  # noqa: F401  (side-effect: register)
+)
 from trading_research.strategies.base import (
     available_strategies,
     get_strategy,

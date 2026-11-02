@@ -1,0 +1,72 @@
+schema_version: 2
+name: rsi_reversion_multi
+description: >
+  RES-1 — вторая стратегия как разделяющий эксперимент. Данные, издержки, нарезка
+  окон и селектор отбора взяты из ma_cross_multi_1h_4h **без изменений**: сравнение
+  должно мерить разницу в логике входа, а не в настройках (RES-3). Отличается
+  только секция strategy и сетка параметров.
+
+data:
+  exchange: binance
+  market: futures
+  symbols:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+  timeframes:
+    - 1h
+    - 4h
+  start: "2022-01-01"
+  end: "2026-10-01"
+
+time_slices:
+  type: quarter
+  min_bars: 300
+
+strategy:
+  name: rsi_reversion
+
+# Прогрев не задаётся: его просит стратегия — 12 периодов RSI (WF-4). Для
+# rsi_period=21 это 252 бара, то есть больше, чем 30-дневное тестовое окно на 4h;
+# прогрев окну добавляется слева, окно от этого не укорачивается.
+params_grid:
+  rsi_period: [7, 14, 21]
+  oversold: [20, 30]
+  overbought: [70, 80]
+
+execution:
+  initial_balance: 10000
+  commission_rate: 0.0006
+  slippage_pct: 0.0003
+  leverage: 3
+  position_size_type: percent_balance
+  position_size_value: 20
+  allow_short: true
+  close_on_reverse_signal: true
+  signal_lag: 1
+  fill_on: next_open
+
+walk_forward:
+  train_days: 180
+  test_days: 30
+  step_days: 30
+  select_by: sharpe
+  anchored: false
+
+holdout:
+  start: "2026-04-01"
+
+metrics:
+  primary: stability_score
+  secondary:
+    - total_return_pct
+    - max_drawdown_pct
+    - sharpe
+    - profit_factor
+    - win_rate
+    - trades_count
+
+output:
+  save_trades: true
+  save_equity_curve: true
+  save_plots: false

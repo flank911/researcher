@@ -1,7 +1,18 @@
-"""REG-2 — чистые индикаторы для фич рыночного режима.
+"""Чистые индикаторы: фичи рыночного режима (REG-2) и ряды для стратегий (RES-1).
 
-Все функции работают на списках значений **одного слайса** (без будущих баров) и
-возвращают скаляр; на пустых/вырожденных входах дают ``0.0`` (без NaN/inf).
+В модуле два разных контракта, и путать их нельзя:
+
+**Скалярные (REG-2).** ``market_return_pct``, ``volatility_pct``, ``trend_strength``,
+``volume_zscore``, ``drawdown_from_ath``, ``adx``, ``bar_returns`` работают на
+значениях **одного слайса** (без будущих баров) и возвращают одно число на слайс;
+на пустых и вырожденных входах дают ``0.0`` (без NaN/inf). Это фичи режима: они
+описывают окно целиком.
+
+**Ряды (RES-1).** ``rsi`` возвращает список длины входа: значение на каждый бар,
+посчитанное только по барам до него включительно. Это индикатор для стратегии, и
+``None`` в начале — не дефект, а отсутствие значения на непрогретом участке
+(контракт сигналов BT-1 требует превратить его в ``False``, а не в ``null``).
+Прогрев таких индикаторов объявляет стратегия (``Strategy.warmup_bars``, WF-4).
 """
 
 from __future__ import annotations
@@ -130,11 +141,72 @@ def adx(
     return sum(dx[-period:]) / period
 
 
+# --- ряды для стратегий (RES-1) --------------------------------------------
+
+
+def rsi(closes: Sequence[float], *, period: int = 14) -> list[float | None]:
+    """Индекс относительной силы по Уайлдеру: значение на каждый бар.
+
+    Определение (``New Concepts in Technical Trading Systems``, 1978):
+
+    - приросты ``d_i = close_i - close_{i-1}`` делятся на рост и падение;
+    - первое среднее — простое по первым ``period`` приростам (затравка Уайлдера);
+    - дальше сглаживание ``avg_i = (avg_{i-1} * (period - 1) + x_i) / period``;
+    - ``RSI = 100 * avg_gain / (avg_gain + avg_loss)``.
+
+    Последняя форма равна классической ``100 - 100 / (1 + RS)``, но не делит на
+    ``avg_loss``: при нулевом падении даёт ровно ``100``, а не бесконечность. Оба
+    средних нулевые (ряд стоит на месте) — значение не определено, ``None``.
+
+    До бара ``period`` значения нет: ``None``, а не ноль. Ноль здесь был бы ложью —
+    ``RSI = 0`` означает «падение без единого роста», то есть сильнейший сигнал на
+    перепроданность, ровно противоположный «значения ещё нет».
+
+    Сглаживание экспоненциальное, то есть вес затравки не исчезает никогда: он
+    падает как ``((period - 1) / period) ** k`` ≈ ``exp(-k / period)``. Поэтому
+    точного прогрева у RSI не существует, и стратегия обязана просить запас — см.
+    ``strategies.rsi_reversion``.
+    """
+    if period < 1:
+        raise ValueError(f"period must be >= 1, got {period}")
+    n = len(closes)
+    out: list[float | None] = [None] * n
+    if n <= period:
+        return out
+
+    gains: list[float] = []
+    losses: list[float] = []
+    for prev, cur in zip(closes, closes[1:], strict=False):
+        delta = cur - prev
+        gains.append(max(delta, 0.0))
+        losses.append(max(-delta, 0.0))
+
+    # Затравка: простое среднее первых ``period`` приростов. Индекс затравки в
+    # ``closes`` — ``period``: столько приростов и нужно, чтобы её посчитать.
+    avg_gain = math.fsum(gains[:period]) / period
+    avg_loss = math.fsum(losses[:period]) / period
+    out[period] = _rsi_value(avg_gain, avg_loss)
+
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        out[i + 1] = _rsi_value(avg_gain, avg_loss)
+    return out
+
+
+def _rsi_value(avg_gain: float, avg_loss: float) -> float | None:
+    total = avg_gain + avg_loss
+    if total == 0:
+        return None
+    return 100.0 * avg_gain / total
+
+
 __all__ = [
     "adx",
     "bar_returns",
     "drawdown_from_ath",
     "market_return_pct",
+    "rsi",
     "trend_strength",
     "volatility_pct",
     "volume_zscore",
