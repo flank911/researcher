@@ -231,29 +231,27 @@ pytest --cov=trading_research
 
 ## CI и код-ревью
 
-Каждый PR в `main` проходит два автоматических пайплайна (см. `.github/workflows/`):
+На каждый PR в `main` работает один автоматический пайплайн
+(см. `.github/workflows/`):
 
 - **Quality gate** (`quality.yml`) — `ruff check`, `ruff format --check`, `mypy`,
-  `pytest` с coverage на матрице Python 3.11–3.13. Падение любого шага блокирует merge.
-- **Claude review** (`claude-review.yml`) — AI-ревьюер комментирует PR по двум осям:
-  *качество кода* (читаемость, дублирование, типобезопасность, тесты, архитектурные
-  принципы) и *корректность задачи* (сверка диффа с DoD связанного тикета). ID тикета
-  берётся из тела PR или имени ветки, поэтому **указание тикета в PR обязательно**
-  (см. [PR template](.github/pull_request_template.md)).
+  `pytest` с coverage на матрице Python 3.11–3.13.
 
-Что требуется для merge в `main` (branch protection):
+**Автоматического AI-ревью нет.** Воркфлоу `claude-review.yml` удалён в
+[INF-9](tickets/INF-9.md): он лежал выключенным, не давал ни чека, ни
+предупреждения, и 14 PR подряд прошли без ревью так, что заметить это можно было
+только через `gh workflow list`. Ревью на PR — ручное. Указание тикета в теле PR
+остаётся обязательным (см. [PR template](.github/pull_request_template.md)): по нему
+сверяется DoD — теперь человеком, а не воркфлоу.
 
-- зелёный **Quality gate** на всех версиях Python из матрицы;
-- пройденное ревью (нет неразрешённых блокеров от Claude review / ревьюеров);
-- запрещён прямой push в `main` — только через PR.
+### Чего в репозитории не настроено
 
-Настройка (одноразово, админом репозитория):
-
-- Секрет `ANTHROPIC_API_KEY` в *Settings → Secrets and variables → Actions*
-  (нужен для Claude review).
-- *Settings → Branches → Add branch ruleset* для `main`: require status checks
-  (выбрать джобы `checks` из Quality gate), require pull request before merging,
-  block direct pushes.
+Branch protection для `main` **не включена**: прямой push не запрещён, и красный
+Quality gate merge не блокирует. Это не теория — именно так красный py3.11 прожил три
+мержа (#39 → #41, см. [INF-8](tickets/INF-8.md)). Что нужно сделать владельцу
+репозитория: *Settings → Branches → Add branch ruleset* для `main` — require status
+checks (выбрать джобы из Quality gate), require pull request before merging, block
+direct pushes.
 
 ## План работ
 
@@ -263,6 +261,6 @@ MVP: `INF-1..3 → DATA-1..6 → BT-1..8 → EXP-1..6 → AN-1..4`; далее
 E5 (walk-forward) → E6 (market regimes) → E7 (первый реальный прогон)
 → E8 (эксплуатация данных) → E9 (расширение исследования).
 
-Текущий фронт: `INF-9` (автоматическое ревью выключено) → эпик E9 «Расширение исследования»: `RES-1` вторая стратегия как
+Текущий фронт: эпик E9 «Расширение исследования»: `RES-1` вторая стратегия как
 разделяющий эксперимент, `RES-2` сетка в сотни комбинаций, `RES-3` второй сквозной
 прогон. Первые девять эпиков закрыты полностью — все 53 тикета.
