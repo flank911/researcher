@@ -80,6 +80,11 @@ class WalkForwardConfig(StrictModel):
     select_by: str = "total_return_pct"
     # True — train расширяется от начала (expanding); False — скользящее окно.
     anchored: bool = False
+    # WF-4: **нижняя** граница прогрева, а не его источник. Сколько баров нужно
+    # индикаторам, знает стратегия (``Strategy.warmup_bars``), и столько окно
+    # получит даже при нуле здесь; этим полем добавляют запас сверху. До WF-4 поле
+    # было единственным источником, и его значение по умолчанию означало «прогрева
+    # нет» — в конфиге первого реального прогона оно и не было задано.
     warmup_bars: int = Field(default=0, ge=0)
 
     @field_validator("select_by")

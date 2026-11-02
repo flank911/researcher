@@ -170,10 +170,16 @@ def _run_independent(
             if not in_window:
                 continue
             first, last = in_window[0], in_window[-1]
-            warm_start = max(0, first - sl.warmup_bars)
+            # WF-4: прогрев просит стратегия, число из окна — нижняя граница. Бары
+            # прогрева греют индикаторы и не торгуются, иначе окно начиналось бы не
+            # с ``initial_balance``, а с него же плюс результат торговли на прогреве.
+            warm = max(sl.warmup_bars, int(strategy.warmup_bars(params)))
+            warm_start = max(0, first - warm)
             sub = data.slice(warm_start, last - warm_start + 1)
 
-            result = run_backtest(strategy, sub, params, execution, engine=engine)
+            result = run_backtest(
+                strategy, sub, params, execution, engine=engine, warmup_bars=first - warm_start
+            )
             sub_times: list[datetime] = result.equity_curve["open_time"].to_list()
             sub_equities: list[float] = [float(x) for x in result.equity_curve["equity"].to_list()]
             # Независимое окно: база сброшена к initial_balance, прогрев исключён.

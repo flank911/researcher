@@ -30,6 +30,22 @@ OOS-метрики (BT-7) считаются по склеенной криво�
 бар входа, в том же порядке, поэтому позиция окна внутри прогона известна заранее и
 искать её второй раз не нужно. Это инвариант, а не предположение — он проверяется
 сравнением высот, и его нарушение поднимает ошибку, а не портит цифры молча.
+
+**WF-4 — прогрев окна берётся из стратегии, а не из конфига.** Каждое окно фолда —
+отдельный бэктест, то есть проблема прогрева на границах окон, которую EXP-2 снял
+непрерывным прогоном, здесь возвращается. До WF-4 защитой от неё было одно число в
+конфиге (``walk_forward.warmup_bars``) со значением по умолчанию ``0``, и в конфиге
+первого реального прогона оно не было задано: окна стартовали с холодного
+индикатора, а на 4h тестовое окно в 180 бар при ``slow_ma=200`` не прогревалось
+никогда. Теперь прогрев считает сама стратегия — ``warmup_bars(params)`` на **каждую
+комбинацию**, а число из конфига работает нижней границей (ручной запас). Комбинация
+получает ровно свой прогрев, поэтому её результат не зависит от того, что ещё лежит
+в сетке: иначе добавление длинной средней в ``params_grid`` молча меняло бы цифры
+соседних комбинаций.
+
+Бары прогрева греют индикаторы, но не торгуются — см. ``runner.run_backtest``.
+Поэтому сегмент окна начинается ровно с перенесённого баланса, и склейка OOS не
+получает разрыва на стыке фолдов.
 """
 
 from __future__ import annotations
@@ -92,6 +108,8 @@ class _SelectTask:
     train_window: TimeSlice
     strategy: Strategy
     param_combos: tuple[Mapping[str, Any], ...]
+    # Прогрев на каждую комбинацию, в том же порядке (WF-4).
+    warmups: tuple[int, ...]
     execution: ExecutionModel
     timeframe: str
     select_by: str
@@ -149,10 +167,23 @@ def run_walk_forward(
     oos_segments: list[pl.DataFrame] = []
     oos_trades: list[Trade] = []
 
+    # Прогрев на комбинацию: столько, сколько просит стратегия, но не меньше
+    # ручного запаса из конфига (WF-4). Считается один раз — число от окна не
+    # зависит, а ``warmup_bars`` у стратегии может быть не бесплатным.
+    combos = tuple(param_combos)
+    warmups = tuple(int(strategy.warmup_bars(params)) for params in combos)
+    if any(w < 0 for w in warmups):
+        raise ValueError(f"strategy {strategy.name!r} returned a negative warmup: {warmups}")
+
     prepared: list[_FoldWindows] = []
     for fold in folds:
-        train_sub = _slice_window(data, data_times, fold.train)
-        test_sub = _slice_window(data, data_times, fold.test)
+        # Окно режется под самую «долгую» комбинацию, а каждая затем получает свой
+        # прогрев срезом этого же фрейма: в пул уходит один срез на фолд, как и до
+        # WF-4, то есть выигрыш RUN-8 на сериализации сохраняется.
+        train_warm = _window_warmup(fold.train, warmups)
+        test_warm = _window_warmup(fold.test, warmups)
+        train_sub = _slice_window(data, data_times, fold.train, train_warm)
+        test_sub = _slice_window(data, data_times, fold.test, test_warm)
         if train_sub is None or test_sub is None:
             continue
         prepared.append(_FoldWindows(fold=fold, train=train_sub, test=test_sub))
@@ -165,7 +196,8 @@ def run_walk_forward(
     picks = _select_all(
         prepared,
         strategy=strategy,
-        param_combos=tuple(param_combos),
+        param_combos=combos,
+        warmups=warmups,
         execution=execution,
         timeframe=timeframe,
         select_by=select_by,
@@ -180,10 +212,21 @@ def run_walk_forward(
             continue
         best_params, train_score = best
 
-        # Торговля на test с перенесённым балансом.
+        # Торговля на test с перенесённым балансом. Прогрев — свой у выбранной
+        # комбинации, а не максимум по сетке: иначе на EMA-подобных индикаторах
+        # результат фолда зависел бы от состава ``params_grid``.
         test_exec = execution.model_copy(update={"initial_balance": running_balance})
-        result = run_backtest(strategy, test_sub.frame, best_params, test_exec, engine=engine)
-        seg, seg_trades = _window_segment(result, test_sub, fold.test)
+        best_warm = _combo_warmup(fold.test, int(strategy.warmup_bars(best_params)))
+        test_run = _narrow(test_sub, best_warm)
+        result = run_backtest(
+            strategy,
+            test_run.frame,
+            best_params,
+            test_exec,
+            engine=engine,
+            warmup_bars=test_run.offset,
+        )
+        seg, seg_trades = _window_segment(result, test_run, fold.test)
         if seg.is_empty():
             continue
 
@@ -219,6 +262,7 @@ def _select_all(
     *,
     strategy: Strategy,
     param_combos: tuple[Mapping[str, Any], ...],
+    warmups: tuple[int, ...],
     execution: ExecutionModel,
     timeframe: str,
     select_by: str,
@@ -243,6 +287,7 @@ def _select_all(
             train_window=windows.fold.train,
             strategy=strategy,
             param_combos=param_combos,
+            warmups=warmups,
             execution=execution,
             timeframe=timeframe,
             select_by=select_by,
@@ -264,6 +309,7 @@ def _run_select_task(task: _SelectTask) -> tuple[Mapping[str, Any], float] | Non
         task.strategy,
         task.train,
         task.param_combos,
+        task.warmups,
         task.execution,
         task.train_window,
         task.timeframe,
@@ -282,6 +328,7 @@ def _select_on_train(
     strategy: Strategy,
     train_data: _SlicedWindow,
     param_combos: Sequence[Mapping[str, Any]],
+    warmups: Sequence[int],
     execution: ExecutionModel,
     train_window: TimeSlice,
     timeframe: str,
@@ -289,12 +336,25 @@ def _select_on_train(
     min_trades: int,
     engine: BacktestEngine,
 ) -> tuple[Mapping[str, Any], float] | None:
-    """Выбрать лучшую комбинацию по ``select_by`` на train-окне (только прошлое)."""
+    """Выбрать лучшую комбинацию по ``select_by`` на train-окне (только прошлое).
+
+    Каждая комбинация считается на своём прогреве (WF-4): окно нарезано под самую
+    долгую из них, а короткой отдаётся срез этого же фрейма. Так отбор не зависит от
+    состава сетки, а срез в пул уходит один на фолд.
+    """
     best_params: Mapping[str, Any] | None = None
     best_score = float("-inf")
-    for params in param_combos:
-        result = run_backtest(strategy, train_data.frame, params, execution, engine=engine)
-        seg, seg_trades = _window_segment(result, train_data, train_window)
+    for params, warmup in zip(param_combos, warmups, strict=True):
+        window = _narrow(train_data, _combo_warmup(train_window, warmup))
+        result = run_backtest(
+            strategy,
+            window.frame,
+            params,
+            execution,
+            engine=engine,
+            warmup_bars=window.offset,
+        )
+        seg, seg_trades = _window_segment(result, window, train_window)
         if seg.is_empty():
             continue
         metrics = compute_metrics(seg, seg_trades, timeframe, min_trades=min_trades)
@@ -307,10 +367,28 @@ def _select_on_train(
     return best_params, best_score
 
 
+def _combo_warmup(window: TimeSlice, strategy_warmup: int) -> int:
+    """Прогрев комбинации на окне: запрос стратегии, но не ниже ручного запаса.
+
+    ``window.warmup_bars`` приходит из конфига (``walk_forward.warmup_bars``) и
+    остаётся **нижней** границей: им можно добавить запас — например, под
+    индикатор с экспоненциальным сглаживанием, честный прогрев которого формально
+    бесконечен, — но нельзя отнять то, что стратегия просит (WF-4). До WF-4 это
+    число было единственным источником прогрева, и его значение по умолчанию ``0``
+    означало «прогрева нет».
+    """
+    return max(window.warmup_bars, strategy_warmup)
+
+
+def _window_warmup(window: TimeSlice, warmups: Sequence[int]) -> int:
+    """Прогрев, под который режется окно: максимум по сетке (с тем же запасом)."""
+    return max((_combo_warmup(window, w) for w in warmups), default=window.warmup_bars)
+
+
 def _slice_window(
-    data: pl.DataFrame, data_times: Sequence[datetime], window: TimeSlice
+    data: pl.DataFrame, data_times: Sequence[datetime], window: TimeSlice, warmup_bars: int
 ) -> _SlicedWindow | None:
-    """Вырезать окно ``[start, end)`` с барами прогрева перед ним.
+    """Вырезать окно ``[start, end)`` с ``warmup_bars`` барами прогрева перед ним.
 
     Границы ищет ``bisect`` по ``data_times``: список отсортирован по времени, и
     сравнение здесь ровно то же, что было в линейном скане, — но без обхода всей
@@ -320,11 +398,28 @@ def _slice_window(
     stop = bisect_left(data_times, window.end)
     if first >= stop:
         return None
-    warm_start = max(0, first - window.warmup_bars)
+    warm_start = max(0, first - warmup_bars)
     return _SlicedWindow(
         frame=data.slice(warm_start, stop - warm_start),
         offset=first - warm_start,
         length=stop - first,
+    )
+
+
+def _narrow(sliced: _SlicedWindow, warmup_bars: int) -> _SlicedWindow:
+    """Укоротить прогрев окна до ``warmup_bars`` баров (само окно не меняется).
+
+    Нужно затем, чтобы комбинация считалась ровно на своём прогреве, хотя фрейм
+    нарезан под самую долгую в сетке. Если доступного прогрева меньше запрошенного
+    (окно у начала истории), остаётся столько, сколько есть.
+    """
+    cut = max(0, sliced.offset - warmup_bars)
+    if cut == 0:
+        return sliced
+    return _SlicedWindow(
+        frame=sliced.frame.slice(cut),
+        offset=sliced.offset - cut,
+        length=sliced.length,
     )
 
 

@@ -330,10 +330,12 @@ def _independent_segments(
         if not in_window:
             continue
         first, last = in_window[0], in_window[-1]
-        warm_start = max(0, first - sl.warmup_bars)
+        # WF-4: как в оркестраторе — прогрев из стратегии, не торгуется.
+        warm = max(sl.warmup_bars, int(strategy.warmup_bars(params)))
+        warm_start = max(0, first - warm)
         sub = data.slice(warm_start, last - warm_start + 1)
 
-        result = run_backtest(strategy, sub, params, execution)
+        result = run_backtest(strategy, sub, params, execution, warmup_bars=first - warm_start)
         equity, seg_trades = _segment_artifacts(result.equity_curve, result.trades, sl)
         seg_equity = [execution.initial_balance]
         seg_equity.extend(float(x) for x in equity["equity"].to_list())
