@@ -313,12 +313,18 @@ def _run_holdout(
     wf = cfg.walk_forward
     metric = wf.select_by if wf is not None else "total_return_pct"
     params = _holdout_params(result)
+    strategy = get_strategy(cfg.strategy.name)
+    # WF-4: резерв греется хвостом research-части. Это не трата резерва — прогрев
+    # смотрит только назад, а решений на резерве по-прежнему не принимают.
+    warmup = max(wf.warmup_bars if wf is not None else 0, int(strategy.warmup_bars(params)))
+    research_tail = split.research_data(data, symbol=symbol).tail(warmup) if warmup else None
     holdout_metrics = evaluate_holdout(
         holdout_data,
-        get_strategy(cfg.strategy.name),
+        strategy,
         params,
         cfg.execution,
         timeframe,
+        warmup_data=research_tail,
     )
     research_raw = getattr(result.oos_metrics, metric)
     report = build_holdout_report(

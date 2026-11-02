@@ -14,6 +14,19 @@
 - ``evaluate_holdout`` + ``build_holdout_report`` формируют **отдельный** отчёт по
   holdout и степень деградации метрики research → holdout. Запускать однократно.
 
+**WF-4 — резерв прогревается барами до ``holdout_start``, и это не трата резерва.**
+Прогон по резерву — отдельный бэктест, то есть он начинался с холодного индикатора:
+на 4h при ``slow_ma=200`` первые 200 бар резерва (из ~1100) не давали сигналов
+вовсе. Решение: индикаторы греются последними барами research-части, прогрев не
+торгуется (``runner.run_backtest``), в метрики резерва его участок не входит.
+
+Почему это не нарушает политику резерва: прогрев смотрит только **назад** от
+оцениваемого бара, то есть не подглядывает в будущее; и на резерве по-прежнему
+ничего не отбирается — параметры пришли с research-фазы, резерв смотрится один раз.
+«Untouched» в WF-3 значит «на резерве не принимают решений», а не «резерв не знает,
+какой была цена вчера». Обратное решение — не греть вовсе — означало бы, что отчёт
+по резерву систематически недотарговывает тем сильнее, чем длиннее индикатор.
+
 (Опц. на будущее: deflated Sharpe / White's Reality Check — здесь не реализованы.)
 """
 
@@ -104,12 +117,46 @@ def evaluate_holdout(
     *,
     min_trades: int = DEFAULT_MIN_TRADES,
     engine: BacktestEngine | None = None,
+    warmup_data: pl.DataFrame | None = None,
 ) -> Metrics:
-    """Прогнать выбранные ``params`` на holdout и вернуть метрики (BT-7)."""
+    """Прогнать выбранные ``params`` на holdout и вернуть метрики (BT-7).
+
+    ``warmup_data`` — бары **непосредственно перед** резервом (хвост research-части):
+    они греют индикаторы, не торгуются и в метрики не входят (WF-4, см. докстринг
+    модуля). Без них прогон резерва стартует с холодного индикатора и теряет начало
+    резерва тем сильнее, чем длиннее индикатор.
+    """
     if holdout_data.is_empty():
         raise ValueError("holdout_data is empty; nothing to evaluate")
-    result = run_backtest(strategy, holdout_data, params, execution, engine=engine)
-    return compute_metrics(result.equity_curve, result.trades, timeframe, min_trades=min_trades)
+    frame, warmup_bars = _with_warmup(holdout_data, warmup_data)
+    result = run_backtest(
+        strategy, frame, params, execution, engine=engine, warmup_bars=warmup_bars
+    )
+    # Прогрев из метрик вырезан: сигналы на нём погашены, поэтому сделок там нет, а
+    # кривая обрезается по тому же числу баров — равенство высот даёт движок.
+    curve = result.equity_curve.slice(warmup_bars)
+    return compute_metrics(curve, result.trades, timeframe, min_trades=min_trades)
+
+
+def _with_warmup(
+    holdout_data: pl.DataFrame, warmup_data: pl.DataFrame | None
+) -> tuple[pl.DataFrame, int]:
+    """Приклеить прогрев перед резервом; вернуть фрейм и число баров прогрева.
+
+    Непрерывность проверяется, а не предполагается: прогрев, взятый не из баров
+    прямо перед резервом, дал бы индикатору разрыв в истории и тихо неверные
+    значения на первых барах резерва.
+    """
+    if warmup_data is None or warmup_data.is_empty():
+        return holdout_data, 0
+    last_warm = warmup_data[_TIME_COL][-1]
+    first_holdout = holdout_data[_TIME_COL][0]
+    if last_warm >= first_holdout:
+        raise ValueError(
+            f"warmup_data must end before the reserve starts: "
+            f"last warmup bar {last_warm} >= first holdout bar {first_holdout}"
+        )
+    return pl.concat([warmup_data, holdout_data], how="vertical"), warmup_data.height
 
 
 def build_holdout_report(

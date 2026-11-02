@@ -129,7 +129,7 @@ def test_window_bounds_match_the_linear_scan(warmup: int) -> None:
 
     for offset_h, span_h in ((0, 24), (7, 1), (100, 73), (499, 1), (480, 100)):
         window = _window(offset_h, span_h, warmup=warmup)
-        sliced = _slice_window(data, times, window)
+        sliced = _slice_window(data, times, window, warmup)
         expected = _scan_bounds(times, window)
 
         assert expected is not None
@@ -149,7 +149,7 @@ def test_window_outside_data_is_none_as_before() -> None:
     times = data["open_time"].to_list()
     window = _window(24 * 400, 24, warmup=0)
 
-    assert _slice_window(data, times, window) is None
+    assert _slice_window(data, times, window, 0) is None
     assert _scan_bounds(times, window) is None
 
 
@@ -161,7 +161,7 @@ def test_misaligned_equity_curve_raises_instead_of_silently_shifting() -> None:
     data = _candles(200)
     times = data["open_time"].to_list()
     window = _window(10, 50, warmup=5)
-    sliced = _slice_window(data, times, window)
+    sliced = _slice_window(data, times, window, 5)
     assert sliced is not None
 
     truncated = BacktestResult(

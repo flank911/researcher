@@ -29,7 +29,7 @@ ExperimentRun = Strategy + StrategyParams + Symbol + Timeframe
 
 ## Состояние
 
-Платформа счётно готова и проверена на реальной истории: 563 теста, `ruff`, `mypy`
+Платформа счётно готова и проверена на реальной истории: 576 тестов, `ruff`, `mypy`
 зелёные. Первое исследование проведено — BTCUSDT / ETHUSDT / SOLUSDT × 1h / 4h,
 2022-01-01 … 2026-10-01, отчёт в
 [`notebooks/004_first_research.ipynb`](notebooks/004_first_research.ipynb).
@@ -130,7 +130,8 @@ trading-research plot-heatmap --experiment ma_cross_multi --x fast_ma --y slow_m
 #    каждой паре — строка holdout: research vs резерв, деградация, сделки и
 #    пометка ненадёжного результата; отсутствие holdout объяснено, а не
 #    умолчано (RUN-9). --workers 0 берёт число ядер; результат от числа
-#    воркеров не зависит (RUN-8).
+#    воркеров не зависит (RUN-8). Прогрев окна задаёт стратегия, а не конфиг
+#    (WF-4): warmup_bars в секции walk_forward — нижняя граница, запас сверху.
 trading-research walk-forward --config configs/experiments/ma_cross_multi_1h_4h.yaml \
   --workers 8
 
