@@ -69,7 +69,13 @@ class SeriesKind(StrEnum):
 # диапазона на окна (REG-5), и разъехаться эти два списка не должны.
 SERIES_PERIODS: tuple[str, ...] = tuple(PERIOD_MS)
 
-_PERIODIC = (SeriesKind.OPEN_INTEREST, SeriesKind.LONG_SHORT_RATIO)
+PERIODIC_SERIES = (SeriesKind.OPEN_INTEREST, SeriesKind.LONG_SHORT_RATIO)
+"""Ряды с окном retention: биржа отдаёт их только за последние ~30 дней.
+
+Публичный, потому что тот же набор нужен read-model состояния (ADM-1): запас до
+невосполнимой потери есть только у этих двух рядов, и знание об этом должно
+лежать в одном месте.
+"""
 
 _SCHEMAS = {
     SeriesKind.FUNDING: FUNDING_SCHEMA,
@@ -262,7 +268,7 @@ def clamp_to_retention(start: datetime, *, kind: SeriesKind, now: datetime) -> d
     решает по ней, какая часть истории уже невосполнима. Две копии этой формулы
     разъехались бы молча — расхождение проявилось бы только на краю окна.
     """
-    if kind not in _PERIODIC:
+    if kind not in PERIODIC_SERIES:
         return _as_utc(start)
     return max(_as_utc(start), now - SAFE_RETENTION)
 
@@ -286,7 +292,7 @@ def _coverage(
     # загруженном ряде — UTC-aware; без приведения сравнение краёв падает.
     start, end, asked_start = _as_utc(start), _as_utc(end), _as_utc(asked_start)
 
-    period_delta = timedelta(milliseconds=PERIOD_MS[period]) if kind in _PERIODIC else None
+    period_delta = timedelta(milliseconds=PERIOD_MS[period]) if kind in PERIODIC_SERIES else None
     # max(0, …): на диапазоне целиком вне окна start уезжает за end, и без этого
     # «ожидалось» получилось бы отрицательным.
     expected = max(0, int((end - start) / period_delta)) if period_delta else None
@@ -320,7 +326,7 @@ def _validate_period(wanted: list[SeriesKind], timeframe: str) -> None:
     «успешную» загрузку нуля строк, что выглядит как отсутствие данных, а не как
     ошибка запроса.
     """
-    periodic = [k.value for k in wanted if k in _PERIODIC]
+    periodic = [k.value for k in wanted if k in PERIODIC_SERIES]
     if periodic and timeframe not in SERIES_PERIODS:
         raise ValueError(
             f"timeframe {timeframe!r} is not a valid Binance period for {', '.join(periodic)}; "
@@ -402,6 +408,7 @@ def _fmt(moment: datetime | None) -> str:
 
 
 __all__ = [
+    "PERIODIC_SERIES",
     "SERIES_PERIODS",
     "CoverageStatus",
     "clamp_to_retention",

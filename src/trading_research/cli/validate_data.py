@@ -190,7 +190,8 @@ def validate_data_from_config(
                     timeframe=timeframe,
                     start=cfg.data.start,
                     end=cfg.data.end,
-                    path=_report_path(out_dir, symbol, timeframe, CANDLES),
+                    now=moment,
+                    path=report_path(out_dir, symbol, timeframe, CANDLES),
                 )
             ]
             for spec in SERIES_SPECS:
@@ -209,7 +210,7 @@ def validate_data_from_config(
                         start=cfg.data.start,
                         end=cfg.data.end,
                         now=moment,
-                        path=_report_path(out_dir, symbol, timeframe, spec.dataset),
+                        path=report_path(out_dir, symbol, timeframe, spec.dataset),
                     )
                 )
             result.append(PairValidation(symbol=symbol, timeframe=timeframe, checks=checks))
@@ -264,12 +265,13 @@ def _check_candles(
     timeframe: str,
     start: datetime,
     end: datetime,
+    now: datetime,
     path: Path,
 ) -> DatasetCheck:
     if frame.is_empty():
         return DatasetCheck(dataset=CANDLES, step=timeframe, note="нет данных")
     report = validate_candles(frame, timeframe=timeframe, expected_start=start, expected_end=end)
-    save_report(report, path)
+    save_report(report, path, checked_at=now)
     return DatasetCheck(dataset=CANDLES, report=report, path=path, step=timeframe)
 
 
@@ -310,7 +312,7 @@ def _check_series(
         expected_start=expected_start,
         expected_end=expected_end,
     )
-    save_report(report, path)
+    save_report(report, path, checked_at=now)
     note = None if expected_start is not None else "окно конфига старше retention"
     return DatasetCheck(dataset=spec.dataset, report=report, path=path, step=step, note=note)
 
@@ -376,7 +378,13 @@ def _defect_parts(
     return parts
 
 
-def _report_path(out_dir: Path, symbol: str, timeframe: str, dataset: str) -> Path:
+def report_path(out_dir: Path, symbol: str, timeframe: str, dataset: str) -> Path:
+    """Путь отчёта по паре и датасету.
+
+    Публичная, потому что по тем же путям отчёты читает read-model состояния
+    (ADM-1): собственная формула имени завела бы вторую правду о том, где лежат
+    отчёты, и разъехалась бы молча.
+    """
     return out_dir / f"{symbol}_{timeframe}_{dataset}.json"
 
 
@@ -398,5 +406,6 @@ __all__ = [
     "describe_total",
     "has_defects",
     "infer_step",
+    "report_path",
     "validate_data_from_config",
 ]

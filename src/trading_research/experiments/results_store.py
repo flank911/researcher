@@ -104,6 +104,13 @@ class RunRecord:
     equity_path: str | None
     error: str | None
     metrics: Metrics | None
+    # ADM-1: когда ран записан и когда обновлён. В таблице ``runs`` эти колонки
+    # были с самого начала (EXP-4), но в запись каталога не попадали — и состояние
+    # «последний прогон эксперимента был три недели назад» нельзя было получить,
+    # не обойдя слой хранилища своим SQL. Значения по умолчанию ``None`` — для
+    # записей, собранных в тестах вручную.
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 def trades_to_df(trades: list[Trade]) -> pl.DataFrame:
@@ -128,10 +135,23 @@ def trades_to_df(trades: list[Trade]) -> pl.DataFrame:
 class ResultsStore:
     """Хранилище результатов ранов (Parquet-артефакты + SQLite-каталог)."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, create: bool = True) -> None:
+        """Открыть хранилище результатов.
+
+        ``create=False`` — только читать: ни каталога, ни таблиц не создаётся.
+        Нужно read-model состояния (ADM-1), который не имеет права писать: иначе
+        взгляд на эксперимент, которого нет, создавал бы пустой эксперимент.
+
+        Raises:
+            FileNotFoundError: ``create=False``, а каталога результатов нет.
+        """
         self.root = Path(root)
         self.results_dir = self.root / "results"
         self.db_path = self.root / "catalog.sqlite"
+        if not create:
+            if not self.db_path.exists():
+                raise FileNotFoundError(f"results catalog not found: {self.db_path}")
+            return
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -366,4 +386,11 @@ def _row_to_record(run_row: sqlite3.Row, metric_row: sqlite3.Row | None) -> RunR
         equity_path=run_row["equity_path"],
         error=run_row["error"],
         metrics=metrics,
+        created_at=_parse_time(run_row["created_at"]),
+        updated_at=_parse_time(run_row["updated_at"]),
     )
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    """Время из каталога; ``None`` — колонки нет (каталог старого формата)."""
+    return datetime.fromisoformat(value) if value else None
