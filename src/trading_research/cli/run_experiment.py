@@ -53,6 +53,17 @@ from trading_research.hashing import git_commit_hash
 from trading_research.strategies import get_strategy
 
 RESULTS_FILE = "performance.parquet"
+
+
+def experiment_store_root(results_root: str | Path, experiment: str) -> Path:
+    """Корень хранилища результатов эксперимента — каталог, который пишет прогон.
+
+    Публичная, потому что тот же путь нужен read-model состояния (ADM-1): вторая
+    формула того, где лежит эксперимент, разъехалась бы молча.
+    """
+    return Path(results_root) / experiment
+
+
 LEDGER_DIR = "ledger"
 _TIME_COL = "open_time"
 
@@ -107,7 +118,7 @@ def run_experiment_from_config(
             "config produced no time slices; check data range and time_slices.min_bars"
         )
 
-    store_root = Path(results_root) / cfg.name
+    store_root = experiment_store_root(results_root, cfg.name)
     store = ResultsStore(store_root)
     ledger = RunLedger(store_root / LEDGER_DIR)
     if not resume:
@@ -354,6 +365,7 @@ def _independent_segments(
 __all__ = [
     "LEDGER_DIR",
     "RESULTS_FILE",
+    "experiment_store_root",
     "WorkerContext",
     "compute_group",
     "group_specs_by_params",

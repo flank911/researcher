@@ -11,6 +11,7 @@ import pytest
 from trading_research.data.schema import UTC_MS
 from trading_research.data.validators import (
     ValidationReport,
+    load_report,
     save_report,
     validate_candles,
 )
@@ -252,7 +253,28 @@ def test_partial_pre_listing_counts_only_after_listing() -> None:
 def test_report_json_roundtrip(tmp_path: Path) -> None:
     report = validate_candles(_df(_run([0, 1, 2, 5])), timeframe="1h")
     path = tmp_path / "report.json"
-    save_report(report, path)
+    save_report(report, path, checked_at=T0)
     restored = ValidationReport.model_validate_json(path.read_text(encoding="utf-8"))
-    assert restored == report
+    # ADM-1: отличие от исходного отчёта ровно одно — время проверки, которое
+    # ставит запись. Сам валидатор остаётся чистой функцией от данных.
+    assert restored == report.model_copy(update={"checked_at": T0})
     assert restored.gaps[0].missing_bars == 2
+
+
+def test_report_is_stamped_even_without_explicit_time(tmp_path: Path) -> None:
+    """Вердикт без даты неотличим от устаревшего, поэтому время ставится всегда (ADM-1)."""
+    before = datetime.now(UTC)
+    path = tmp_path / "report.json"
+    save_report(validate_candles(_df(_run([0, 1])), timeframe="1h"), path)
+
+    restored = load_report(path)
+    assert restored.checked_at is not None
+    assert restored.checked_at >= before
+
+
+def test_load_report_rejects_foreign_json(tmp_path: Path) -> None:
+    path = tmp_path / "foreign.json"
+    path.write_text('{"timeframe": "1h"}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not a DATA-3 validation report"):
+        load_report(path)

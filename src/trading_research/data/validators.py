@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,6 +59,11 @@ class ValidationReport(FrozenModel):
     ohlc_inconsistencies: list[datetime] = Field(default_factory=list)
     price_outliers: list[datetime] = Field(default_factory=list)
     listing_at: datetime | None = None
+    # ADM-1: когда проверяли. Заполняется на записи (``save_report``), а не здесь:
+    # валидатор обязан быть чистой функцией от данных, иначе отчёт нельзя сверить
+    # побитово в тесте. Недатированный вердикт о качестве данных неотличим от
+    # устаревшего — до ADM-1 отчёты в data/reports/ датировались только mtime.
+    checked_at: datetime | None = None
 
     @property
     def is_clean(self) -> bool:
@@ -162,15 +168,48 @@ def validate_candles(
     )
 
 
-def save_report(report: ValidationReport | SeriesValidationReport, path: str | Path) -> None:
+def save_report(
+    report: ValidationReport | SeriesValidationReport,
+    path: str | Path,
+    *,
+    checked_at: datetime | None = None,
+) -> None:
     """Сохранить отчёт в JSON (UTF-8, с отступами).
 
     Принимает оба отчёта DATA-3: у свечей и у рядов funding/OI/LS одинаковый
     способ сериализации, а CLI (DATA-8) сохраняет и те, и другие.
+
+    ``checked_at`` — время проверки (ADM-1). Часы живут здесь, на границе записи, а
+    не в валидаторе: вызывающий обычно уже знает свой ``now`` (у DATA-8 это точка
+    отсчёта retention) и передаёт его, так что время проверки и окно сверки в
+    отчёте — одно и то же время. Без аргумента время всё равно ставится: вердикт
+    без даты неотличим от устаревшего.
     """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    stamped = report.model_copy(update={"checked_at": checked_at or datetime.now(UTC)})
+    p.write_text(stamped.model_dump_json(indent=2), encoding="utf-8")
+
+
+def load_report(path: str | Path) -> ValidationReport | SeriesValidationReport:
+    """Прочитать сохранённый отчёт (ADM-1).
+
+    Какой из двух отчётов лежит в файле, видно по счётчику строк: у свечей это
+    ``total_bars``, у ряда — ``total_rows``. Отчёты, записанные до ADM-1, читаются
+    с ``checked_at=None`` — то есть «время проверки неизвестно», а не «проверено
+    сейчас».
+
+    Raises:
+        ValueError: в файле не отчёт DATA-3.
+    """
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: validation report must be a mapping")
+    if "total_bars" in raw:
+        return ValidationReport.model_validate(raw)
+    if "total_rows" in raw:
+        return SeriesValidationReport.model_validate(raw)
+    raise ValueError(f"{path}: not a DATA-3 validation report (no total_bars/total_rows)")
 
 
 class SeriesValidationReport(FrozenModel):
@@ -185,6 +224,8 @@ class SeriesValidationReport(FrozenModel):
     is_monotonic: bool = True
     non_finite: int = 0  # строк с NaN/inf в value-колонках
     negative: int = 0  # строк с отрицательными значениями в non_negative-колонках
+    # ADM-1 — см. ``ValidationReport.checked_at``.
+    checked_at: datetime | None = None
 
     @property
     def is_clean(self) -> bool:
@@ -341,6 +382,7 @@ __all__ = [
     "Gap",
     "SeriesValidationReport",
     "ValidationReport",
+    "load_report",
     "save_report",
     "validate_candles",
     "validate_series",
