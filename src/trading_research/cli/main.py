@@ -7,6 +7,7 @@ Typer-приложение с командами ``fetch-data`` и ``run-experim
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +36,11 @@ from trading_research.cli.fetch_market_data import (
 )
 from trading_research.cli.plot_heatmap import plot_experiment_heatmap
 from trading_research.cli.run_experiment import run_experiment_from_config
+from trading_research.cli.status import (
+    describe_report,
+    status_from_config,
+    status_payload,
+)
 from trading_research.cli.update_data import (
     describe_total as describe_candle_total,
 )
@@ -222,6 +228,40 @@ def validate_data_cmd(
     # можно ставить в пайплайн перед run-experiment — тогда прогон не стартует
     # на данных с дырами.
     if strict and has_validation_defects(pairs):
+        raise typer.Exit(code=1)
+
+
+@app.command("status")
+def status_cmd(
+    config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+    results_root: Path = typer.Option(Path("data/results"), help="Корень результатов."),
+    reports_root: Path = typer.Option(Path("data/reports"), help="Корень JSON-отчётов."),
+    log: Path = typer.Option(
+        Path("data/logs/update-market-data.log"), help="Лог регулярного сбора (OPS-1)."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Машинный вывод вместо экранного."),
+    strict: bool = typer.Option(
+        False, "--strict", help="Ненулевой код возврата, если требуется вмешательство."
+    ),
+) -> None:
+    """Показать состояние платформы: данные, расписание, валидация, эксперименты."""
+    report = status_from_config(
+        config,
+        data_root=data_root,
+        results_root=results_root,
+        reports_root=reports_root,
+        log_path=log if log.exists() else None,
+    )
+    if as_json:
+        typer.echo(json.dumps(status_payload(report), ensure_ascii=False, indent=2))
+    else:
+        for line in describe_report(report):
+            typer.echo(line)
+
+    # Без --strict команда остаётся диагностикой: поводы видны, код 0. С ним её
+    # можно ставить перед прогоном — как validate-data (DATA-8).
+    if strict and report.needs_attention:
         raise typer.Exit(code=1)
 
 
