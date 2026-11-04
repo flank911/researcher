@@ -65,24 +65,41 @@
     .pair { margin: 0 0 6px; font-weight: 600; }
     section.pair-block { margin-bottom: 22px; }
     footer { padding: 0 24px 32px; color: var(--muted); font-size: 13px; }
+    form.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 14px; }
+    form.filters label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+    form.filters select, form.filters button { font: inherit; font-size: 13px; padding: 3px 6px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; }
+    form.filters button { cursor: pointer; }
+    a { color: var(--accent); }
+    pre.cmd { margin: 0; padding: 10px 12px; background: var(--line); border-radius: 4px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+    dl.facts dt { color: var(--muted); font-size: 13px; }
+    dl.facts dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .heatmap { display: grid; gap: 2px; width: max-content; }
+    .heatmap a, .heatmap span.cell { display: block; min-width: 76px; padding: 8px 6px; text-align: center; border-radius: 3px; text-decoration: none; color: var(--fg); font-variant-numeric: tabular-nums; }
+    .heatmap span.axis { display: block; padding: 8px 6px; text-align: center; color: var(--muted); font-size: 13px; }
+    .heatmap span.empty { color: var(--muted); border: 1px dashed var(--line); }
+    svg.equity { width: 100%; max-width: 760px; height: 160px; }
+    svg.equity path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+    .warn { color: var(--alarm); }
   </style>
 </head>
 <body>
 <header>
-  <h1>{{ state.experiment }}</h1>
+  <h1>{{ shell.experiment }}</h1>
   <nav>
     <a href="/" {% if page == "overview" %}class="current"{% endif %}>Обзор</a>
     <a href="/data" {% if page == "data" %}class="current"{% endif %}>Данные</a>
+    <a href="/experiments" {% if page == "experiments" %}class="current"{% endif %}>Эксперименты</a>
     <a href="/api/status">JSON</a>
   </nav>
-  <span class="meta mono">состояние на {{ state.now | moment }}</span>
+  <span class="meta mono">{{ shell.now | moment }}</span>
 </header>
 <main>
   {% block content %}{% endblock %}
 </main>
 <footer>
   Только чтение: запуск шагов пайплайна — отдельный тикет (ADM-6).
-  Конфиг: <span class="mono">{{ state.config_path }}</span>
+  Конфиг: <span class="mono">{{ shell.config_path }}</span>
 </footer>
 </body>
 </html>

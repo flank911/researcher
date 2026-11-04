@@ -67,8 +67,11 @@
 {% if state.results %}
   <p class="line muted">
     слайсов {{ state.results.slices }}, наборов параметров {{ state.results.param_sets }},
-    стратегии: {{ state.results.strategies | join(", ") }}
+    стратегии: {{ state.results.strategies | join(", ") }}.
+    <a href="/experiments/{{ state.results.name }}">рейтинг, карта параметров и прогоны</a>
   </p>
+{% else %}
+  <p class="line muted">список экспериментов — на странице <a href="/experiments">Эксперименты</a></p>
 {% endif %}
 
 <h2>Walk-forward</h2>

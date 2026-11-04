@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}{{ experiment.name }}{% endblock %}
+
+{% block content %}
+<h2>{{ experiment.name }}</h2>
+<p class="line muted">
+  {{ experiment.runs }} прогонов, {{ experiment.slices }} слайсов,
+  {{ experiment.pairs | length }} пар, {{ experiment.param_sets }} наборов параметров.
+  Стратегии: {{ experiment.strategies | join(", ") or "—" }}.
+  <a href="/experiments/{{ experiment.name }}/runs">все прогоны</a>
+</p>
+
+{% if table is none %}
+  <p class="line muted">
+    таблицы <span class="mono">performance.parquet</span> нет: каталог прогонов есть, а
+    сводную таблицу AN-1 ещё не писали. Рейтинг и карта параметров считаются из неё —
+    они появятся после завершённого
+    <span class="mono">trading-research run-experiment</span>.
+  </p>
+{% elif not table.height %}
+  <p class="line muted">таблица AN-1 пуста: прогонов с метриками в ней нет</p>
+{% else %}
+
+<form class="filters" method="get" action="/experiments/{{ experiment.name }}">
+  <label>Метрика
+    <select name="metric">
+      {% for name in metrics %}
+        <option value="{{ name }}" {% if name == metric %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Символ
+    <select name="symbol">
+      <option value="">все</option>
+      {% for name in symbols %}
+        <option value="{{ name }}" {% if name == symbol %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Таймфрейм
+    <select name="timeframe">
+      <option value="">все</option>
+      {% for name in timeframes %}
+        <option value="{{ name }}" {% if name == timeframe %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Ось X
+    <select name="x">
+      {% for name in axes %}
+        <option value="{{ name }}" {% if name == x %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Ось Y
+    <select name="y">
+      {% for name in axes %}
+        <option value="{{ name }}" {% if name == y %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Агрегат
+    <select name="agg">
+      {% for name in aggs %}
+        <option value="{{ name }}" {% if name == agg %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Применить</button>
+</form>
+
+<p class="line {{ 'alarm' if ranking.is_concerning else 'muted' }}">
+  Ненадёжных в выборке: {{ ranking.selected_unreliable }} из {{ ranking.selected_runs }}
+  ({{ ranking.selected_share | share }}){% if ranking.is_filtered %}; во всём эксперименте
+  {{ ranking.total_unreliable }} из {{ ranking.total_runs }} ({{ ranking.total_share | share }}){% endif %}.
+  <a href="/experiments/{{ experiment.name }}/runs?reliable=false">посмотреть ненадёжные</a>
+</p>
+
+<h2>Рейтинг параметров (AN-2)</h2>
+{% if ranking.is_empty %}
+  <p class="line muted">под фильтры не попало ни одной строки</p>
+{% else %}
+  <table>
+    <thead>
+      <tr>
+        <th class="num">Ранг</th>
+        <th>Параметры</th>
+        <th class="num">{{ metric }}</th>
+        <th class="num">Прогонов</th>
+        <th class="num">Ненадёжных</th>
+        <th>Откуда</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in ranking.rows %}
+        <tr>
+          <td class="num mono">{{ row.rank }}</td>
+          <td class="mono">{{ row.params | params }}</td>
+          <td class="num mono">{{ row.value | metric }}</td>
+          <td class="num mono">{{ row.runs }}</td>
+          <td class="num mono {{ 'alarm' if row.is_mostly_unreliable else '' }}">
+            {{ row.unreliable }} ({{ row.unreliable_share | share }})
+          </td>
+          <td class="mono">
+            <a href="/experiments/{{ experiment.name }}/runs?param_hash={{ row.param_hash }}{% if symbol %}&symbol={{ symbol }}{% endif %}{% if timeframe %}&timeframe={{ timeframe }}{% endif %}&metric={{ metric }}">{{ row.runs }} прогонов</a>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="line muted">
+    Значение — среднее метрики по прогонам строки, как его считает
+    <span class="mono">rank_params</span>. Красным помечены строки, где ненадёжных
+    прогонов больше половины: такое среднее держится на прогонах с двумя-тремя сделками.
+  </p>
+{% endif %}
+
+<h2>Карта параметров (AN-4)</h2>
+{% if heatmap is none or heatmap.is_empty %}
+  <p class="line muted">
+    для карты нужны две оси параметров со значениями; в сетке этого эксперимента их
+    {{ axes | length }}
+  </p>
+{% else %}
+  <div class="heatmap" style="grid-template-columns: max-content repeat({{ heatmap.xs | length }}, max-content);">
+    <span class="axis">{{ heatmap.y_param }} \ {{ heatmap.x_param }}</span>
+    {% for xv in heatmap.xs %}<span class="axis">{{ xv }}</span>{% endfor %}
+    {% for yv, row in heatmap.labelled_rows %}
+      <span class="axis">{{ yv }}</span>
+      {% for cell in row %}
+        {%- if cell.is_empty -%}
+          <span class="cell empty">—</span>
+        {%- else -%}
+          <a class="cell"
+             style="background: var(--line); background: color-mix(in srgb, var(--accent) {{ (cell.shade * 72) | round | int }}%, var(--bg));"
+             title="{{ heatmap.agg }}({{ heatmap.metric }}) = {{ cell.value | metric }}"
+             href="/experiments/{{ experiment.name }}/runs?param={{ heatmap.x_param }}:{{ cell.x }}&param={{ heatmap.y_param }}:{{ cell.y }}{% if symbol %}&symbol={{ symbol }}{% endif %}{% if timeframe %}&timeframe={{ timeframe }}{% endif %}&metric={{ metric }}">{{ cell.value | metric(2) }}</a>
+        {%- endif -%}
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <p class="line muted">
+    {{ heatmap.agg }}({{ heatmap.metric }}) от {{ heatmap.low | metric }} до
+    {{ heatmap.high | metric }}. Ячейка — ссылка на прогоны, из которых она посчитана:
+    в PNG (<span class="mono">plot-heatmap</span>) это тупик, и для отчётов он остаётся,
+    а здесь путь к числу должен продолжаться.
+  </p>
+{% endif %}
+
+<h2>Устойчивость параметров (AN-3)</h2>
+{% if stability.is_empty %}
+  <p class="line muted">под фильтры не попало ни одной строки</p>
+{% else %}
+  {% if stability.mixes_pairs %}
+    <p class="line alarm">
+      В выборке {{ stability.pairs }} пар. <span class="mono">top_quantile_freq</span>
+      сравнивает комбинации внутри слайса, поэтому при нескольких парах в одном слайсе
+      оказываются разные рынки: AN-3 просит сначала отфильтровать таблицу до одной пары.
+      Остальные колонки вектора от этого не страдают.
+    </p>
+  {% endif %}
+  <table>
+    <thead>
+      <tr>
+        <th class="num">Ранг</th>
+        <th>Параметры</th>
+        <th class="num">score</th>
+        <th class="num">медиана</th>
+        <th class="num">прибыльных</th>
+        <th class="num">худший</th>
+        <th class="num">IQR</th>
+        <th class="num">строк</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in stability.rows %}
+        <tr>
+          <td class="num mono">{{ row.rank }}</td>
+          <td class="mono">{{ row.params | params }}</td>
+          <td class="num mono">{{ row.stability_score | metric(2) }}</td>
+          <td class="num mono">{{ row.median_return | metric(2) }}</td>
+          <td class="num mono">{{ row.positive_slices_ratio | share }}</td>
+          <td class="num mono">{{ row.worst_slice | metric(2) }}</td>
+          <td class="num mono">{{ row.iqr | metric(2) }}</td>
+          <td class="num mono">{{ row.table_rows }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="line muted">
+    Вектор AN-3 считается по метрике <span class="mono">{{ stability.metric }}</span>.
+    Композит <span class="mono">score</span> иллюстративен: основной вывод — весь вектор,
+    а не одно число (принцип №7 — стабильность важнее пика).
+  </p>
+{% endif %}
+
+{% endif %}
+{% endblock %}

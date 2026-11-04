@@ -9,15 +9,19 @@
 from __future__ import annotations
 
 import json
+import re
 import textwrap
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 
 import polars as pl
 import pytest
 
+from trading_research.admin import runs as admin_runs
 from trading_research.admin import state as admin_state
+from trading_research.admin import web as admin_web
 from trading_research.admin.state import (
     DatasetState,
     collect_state,
@@ -634,17 +638,31 @@ def test_collect_state_writes_nothing(tmp_path: Path) -> None:
     assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
 
 
-def test_state_reads_only_through_stores() -> None:
+@pytest.mark.parametrize("module", [admin_state, admin_runs, admin_web])
+def test_admin_reads_only_through_stores(module: ModuleType) -> None:
     """В пакете нет своего доступа к данным: ни SQL, ни чтения parquet, ни путей.
 
     Это и есть защита от третьей реализации чтения: расхождение «в панели одно
-    число, в CLI другое» иначе проявилось бы молча.
+    число, в CLI другое» иначе проявилось бы молча. Запрещены именно **свои**
+    движки и свои формулы путей — ``DuckDBStore`` и ``ResultsStore`` для того и
+    существуют, чтобы через них читали все.
+
+    Проверка распространена на весь пакет в ADM-4: страницы прогонов — ровно то
+    место, где соблазн сходить в каталог своим SQL сильнее всего.
     """
-    source = Path(admin_state.__file__).read_text(encoding="utf-8")
+    source = Path(module.__file__ or "").read_text(encoding="utf-8")
     body = source.split('"""', 2)[2]  # без докстринга модуля, где эти слова упомянуты
 
-    for forbidden in ("sqlite3", "duckdb", "read_parquet", "catalog.sqlite", "performance.parquet"):
-        assert forbidden not in body, forbidden
+    engines = re.findall(r"(?m)^\s*(?:import|from)\s+(duckdb|sqlite3|pyarrow)\b", body)
+    assert engines == [], f"{module.__name__} открывает хранилище сам: {engines}"
+    for forbidden in (
+        "read_parquet",
+        "catalog.sqlite",
+        "performance.parquet",
+        "trades.parquet",
+        "equity.parquet",
+    ):
+        assert forbidden not in body, f"{module.__name__} знает свой путь к данным: {forbidden}"
 
 
 def test_results_store_read_only_mode_creates_nothing(tmp_path: Path) -> None:

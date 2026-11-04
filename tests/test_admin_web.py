@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import socket
@@ -32,9 +33,15 @@ pytest.importorskip("httpx2", reason="starlette.testclient требует httpx2
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from tests.test_admin_runs import DATASET as RUNS_DATASET  # noqa: E402
+from tests.test_admin_runs import EXP as RUNS_EXP  # noqa: E402
+from tests.test_admin_runs import _config as runs_config  # noqa: E402
+from tests.test_admin_runs import seed_experiment  # noqa: E402
+from trading_research.admin import runs as runs_model  # noqa: E402
 from trading_research.admin.web import Roots, create_app  # noqa: E402
 from trading_research.cli import admin as cli_admin  # noqa: E402
 from trading_research.cli.main import app as cli_app  # noqa: E402
+from trading_research.cli.run_experiment import experiment_store_root  # noqa: E402
 from trading_research.cli.status import (  # noqa: E402
     StatusReport,
     describe_results,
@@ -51,6 +58,7 @@ from trading_research.cli.walk_forward import (  # noqa: E402
 )
 from trading_research.data.schema import CANDLE_SCHEMA, FUNDING_SCHEMA  # noqa: E402
 from trading_research.data.storage.parquet_store import FUNDING, ParquetStore  # noqa: E402
+from trading_research.experiments.results_store import ResultsStore  # noqa: E402
 
 runner = CliRunner()
 
@@ -427,3 +435,239 @@ def test_base_cli_works_without_web_dependencies() -> None:
 
     assert proc.returncode == 0, proc.stderr
     assert "ok" in proc.stdout
+
+
+# --- ADM-4: эксперименты, прогоны и происхождение ---------------------------
+
+
+def _experiment(tmp_path: Path, *, failed: bool = False) -> TestClient:
+    """Админка, открытая на конфиге того же эксперимента, что в результатах.
+
+    Имя конфига должно совпадать с именем эксперимента: модель исполнения живёт
+    в конфиге, и без совпадения происхождение прогона не пересчитать.
+    """
+    seed_experiment(tmp_path / "results", failed=failed)
+    cfg_path = tmp_path / "runs.json"
+    runs_config(cfg_path)
+    return TestClient(
+        create_app(
+            Roots(
+                config=cfg_path,
+                data=tmp_path / "raw",
+                results=tmp_path / "results",
+                reports=tmp_path / "reports",
+            )
+        )
+    )
+
+
+def test_experiments_page_lists_what_was_run(tmp_path: Path) -> None:
+    client = _experiment(tmp_path)
+
+    page = client.get("/experiments")
+
+    assert page.status_code == 200
+    assert RUNS_EXP in page.text
+    assert "ma_cross" in page.text
+    assert f'href="/experiments/{RUNS_EXP}"' in page.text
+
+
+def test_every_ranking_row_leads_to_exactly_its_runs(tmp_path: Path) -> None:
+    """Главное обещание страницы: «прогонов N» открывает ровно N прогонов.
+
+    Число на рейтинге и число строк на странице прогонов считаются разными
+    путями — агрегатом таблицы AN-1 и обходом каталога. Ссылка, ведущая не туда,
+    делает весь путь к происхождению бессмысленным.
+    """
+    client = _experiment(tmp_path)
+    page = client.get(f"/experiments/{RUNS_EXP}")
+    links = re.findall(r'href="(/experiments/[^"]*param_hash=[^"]+)">(\d+) прогонов</a>', page.text)
+
+    assert links, "в рейтинге нет ссылок на прогоны"
+    for href, promised in links:
+        runs_page = client.get(html.unescape(href))
+        assert runs_page.status_code == 200
+        assert len(re.findall(r'/runs/[0-9a-f]{16}"', runs_page.text)) == int(promised)
+
+
+def test_heatmap_cell_leads_to_the_runs_it_averages(tmp_path: Path) -> None:
+    """Ячейка карты — ссылка, а не картинка: в PNG путь к числу обрывается."""
+    client = _experiment(tmp_path)
+    page = client.get(f"/experiments/{RUNS_EXP}")
+    cells = re.findall(r'<a class="cell"[^>]*href="(/experiments/[^"]*param=[^"]+)"', page.text)
+
+    assert cells, "ячейки карты не ссылаются на прогоны"
+    runs_page = client.get(html.unescape(cells[0]))
+    assert runs_page.status_code == 200
+    assert "прогонов" in runs_page.text
+
+
+def test_unreliable_share_is_shown_next_to_the_ranking(tmp_path: Path) -> None:
+    """Доля ненадёжных стоит рядом со значением, а не в сноске под таблицей."""
+    client = _experiment(tmp_path)
+
+    page = client.get(f"/experiments/{RUNS_EXP}").text
+
+    assert "Ненадёжных в выборке" in page
+    assert '<th class="num">Ненадёжных</th>' in page, "колонки доли в рейтинге нет"
+    assert "reliable=false" in page
+
+
+def test_experiment_share_survives_a_filter(tmp_path: Path) -> None:
+    """При фильтре по паре доля по всему эксперименту остаётся на странице."""
+    client = _experiment(tmp_path)
+
+    page = client.get(f"/experiments/{RUNS_EXP}?symbol=BTCUSDT").text
+
+    assert "во всём эксперименте" in page
+
+
+def test_run_page_shows_provenance_and_the_command(tmp_path: Path) -> None:
+    client = _experiment(tmp_path)
+    runs_page = client.get(f"/experiments/{RUNS_EXP}/runs")
+    run_hash = re.findall(r"/runs/([0-9a-f]{16})", runs_page.text)[0]
+
+    page = client.get(f"/experiments/{RUNS_EXP}/runs/{run_hash}").text
+
+    assert run_hash in page
+    assert "сходится" in page
+    assert "trading-research run-experiment --config" in page
+    assert RUNS_DATASET in page
+
+
+def test_run_page_verifies_the_data_only_when_asked(tmp_path: Path) -> None:
+    """Пересчёт dataset_hash читает всё окно свечей — он по требованию."""
+    client = _experiment(tmp_path)
+    run_hash = re.findall(
+        r"/runs/([0-9a-f]{16})", client.get(f"/experiments/{RUNS_EXP}/runs").text
+    )[0]
+
+    lazy = client.get(f"/experiments/{RUNS_EXP}/runs/{run_hash}").text
+    asked = client.get(f"/experiments/{RUNS_EXP}/runs/{run_hash}?verify=data").text
+
+    assert "проверить, те ли сегодня данные" in lazy
+    assert "проверить, те ли сегодня данные" not in asked
+    # Свечей в этом tmp_path нет вовсе, поэтому проверка честно говорит об этом.
+    assert "проверить не вышло" in asked
+
+
+def test_failed_run_is_shown_with_its_error(tmp_path: Path) -> None:
+    """Упавший прогон — строка с объяснением, а не пятисотка и не пропуск."""
+    client = _experiment(tmp_path, failed=True)
+
+    listing = client.get(f"/experiments/{RUNS_EXP}/runs?status=failed")
+    run_hash = re.findall(r"/runs/([0-9a-f]{16})", listing.text)[0]
+    page = client.get(f"/experiments/{RUNS_EXP}/runs/{run_hash}")
+
+    assert listing.status_code == 200
+    assert "стратегия не нашла колонку close" in listing.text
+    assert page.status_code == 200
+    assert "завершился ошибкой" in page.text
+    assert "метрик нет" in page.text
+
+
+def test_experiment_without_a_table_explains_itself(tmp_path: Path) -> None:
+    """Каталог есть, таблицы AN-1 нет: страница объясняет, а не падает."""
+    ResultsStore(experiment_store_root(tmp_path / "results", "bare_exp"))
+    cfg_path = tmp_path / "runs.json"
+    runs_config(cfg_path)
+    client = TestClient(
+        create_app(
+            Roots(
+                config=cfg_path,
+                data=tmp_path / "raw",
+                results=tmp_path / "results",
+                reports=tmp_path / "reports",
+            )
+        )
+    )
+
+    page = client.get("/experiments/bare_exp")
+
+    assert page.status_code == 200
+    assert "performance.parquet" in page.text
+
+
+def test_unknown_experiment_and_run_are_404(tmp_path: Path) -> None:
+    client = _experiment(tmp_path)
+
+    assert client.get("/experiments/нет-такого").status_code == 404
+    assert client.get(f"/experiments/{RUNS_EXP}/runs/{'0' * 16}").status_code == 404
+
+
+def test_nonsense_in_the_query_does_not_break_the_page(tmp_path: Path) -> None:
+    """Опечатка в адресе не должна ронять страницу пятисоткой из аналитики."""
+    client = _experiment(tmp_path)
+
+    page = client.get(f"/experiments/{RUNS_EXP}?metric=нет-такой&agg=нет&x=нет&y=такой")
+
+    assert page.status_code == 200
+    assert runs_model.DEFAULT_METRIC in page.text
+
+
+def test_identity_is_not_recomputed_from_a_foreign_config(tmp_path: Path) -> None:
+    """Конфиг чужого эксперимента не годится: модель исполнения в нём другая.
+
+    Пересчитать происхождение по первому попавшемуся конфигу значило бы выдать
+    «сходится» там, где сошлось случайно, — хуже, чем честное «не из чего».
+    """
+    seed_experiment(tmp_path / "results")
+    foreign = _config(tmp_path / "foreign.yaml")  # конфиг с другим именем
+    client = TestClient(
+        create_app(
+            Roots(
+                config=foreign,
+                data=tmp_path / "raw",
+                results=tmp_path / "results",
+                reports=tmp_path / "reports",
+            )
+        )
+    )
+    run_hash = re.findall(
+        r"/runs/([0-9a-f]{16})", client.get(f"/experiments/{RUNS_EXP}/runs").text
+    )[0]
+
+    page = client.get(f"/experiments/{RUNS_EXP}/runs/{run_hash}").text
+
+    assert "конфиг этого эксперимента в админке не открыт" in page
+    assert "— сходится" not in page
+    assert "не сходится" not in page
+
+
+def test_run_page_says_the_code_moved_on(tmp_path: Path) -> None:
+    """``git_commit`` входит в ``run_hash``: без этого предупреждения команда лжёт."""
+    client = _experiment(tmp_path)
+    run_hash = re.findall(
+        r"/runs/([0-9a-f]{16})", client.get(f"/experiments/{RUNS_EXP}/runs").text
+    )[0]
+
+    page = client.get(f"/experiments/{RUNS_EXP}/runs/{run_hash}").text
+
+    assert "код изменился" in page
+    assert "git checkout" in page
+
+
+def test_stability_block_warns_about_mixed_pairs(tmp_path: Path) -> None:
+    """Требование AN-3 жило в докстринге; на странице оно должно быть видно."""
+    client = _experiment(tmp_path)
+
+    mixed = client.get(f"/experiments/{RUNS_EXP}").text
+    single = client.get(f"/experiments/{RUNS_EXP}?symbol=BTCUSDT&timeframe=1h").text
+
+    assert "AN-3 просит сначала отфильтровать" in mixed
+    assert "AN-3 просит сначала отфильтровать" not in single
+
+
+def test_experiment_pages_have_no_external_addresses(tmp_path: Path) -> None:
+    client = _experiment(tmp_path)
+    run_hash = re.findall(
+        r"/runs/([0-9a-f]{16})", client.get(f"/experiments/{RUNS_EXP}/runs").text
+    )[0]
+
+    for url in (
+        "/experiments",
+        f"/experiments/{RUNS_EXP}",
+        f"/experiments/{RUNS_EXP}/runs",
+        f"/experiments/{RUNS_EXP}/runs/{run_hash}",
+    ):
+        assert re.findall(r'(?:src|href)="(https?://[^"]+)"', client.get(url).text) == []
