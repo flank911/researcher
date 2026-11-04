@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Обзор — {{ state.experiment }}{% endblock %}
+
+{% block content %}
+<h2>Внимание</h2>
+{% if report.alerts %}
+  <ul class="alerts">
+    {% for alert in report.alerts %}
+      <li><span class="block">{{ alert.block }}</span><span class="alarm">{{ alert.message }}</span></li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="line ok">вмешательство не требуется</p>
+{% endif %}
+
+<h2>Данные</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Пара</th>
+      <th>Ряд</th>
+      <th class="num">Строк</th>
+      <th>Последняя точка</th>
+      <th>Отставание</th>
+      <th>Запас</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for dataset in state.datasets %}
+      <tr>
+        <td>{{ dataset.symbol }} {{ dataset.timeframe }}</td>
+        <td>{{ dataset.dataset }}</td>
+        <td class="num mono">{{ "{:,}".format(dataset.rows).replace(",", " ") }}</td>
+        <td class="mono">{{ dataset.last_point | moment }}</td>
+        <td class="mono">
+          {%- if dataset.lag_periods is not none -%}
+            {{ dataset.lag_periods | periods }}
+          {%- elif dataset.lag -%}
+            {{ dataset.lag | span }}
+          {%- else -%}
+            <span class="muted">—</span>
+          {%- endif -%}
+        </td>
+        <td class="mono">
+          {%- if dataset.is_exhausted -%}
+            <span class="alarm">история потеряна</span>
+          {%- elif dataset.reserve -%}
+            {{ dataset.reserve | span }}
+          {%- else -%}
+            <span class="muted">—</span>
+          {%- endif -%}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="line muted">Подробнее — на странице <a href="/data">Данные</a>.</p>
+
+<h2>Расписание</h2>
+<p class="line">{{ schedule_line }}</p>
+
+<h2>Валидация</h2>
+<p class="line">{{ validation_line }}</p>
+
+<h2>Эксперименты</h2>
+<p class="line">{{ results_line }}</p>
+{% if state.results %}
+  <p class="line muted">
+    слайсов {{ state.results.slices }}, наборов параметров {{ state.results.param_sets }},
+    стратегии: {{ state.results.strategies | join(", ") }}
+  </p>
+{% endif %}
+
+<h2>Walk-forward</h2>
+{% if state.walk_forward | selectattr("exists") | list %}
+  <table>
+    <thead>
+      <tr><th>Пара</th><th class="num">Фолдов</th><th>OOS equity</th><th>Holdout</th></tr>
+    </thead>
+    <tbody>
+      {% for wf in state.walk_forward %}
+        <tr>
+          <td>{{ wf.symbol }} {{ wf.timeframe }}</td>
+          <td class="num mono">{{ wf.folds }}</td>
+          <td>{{ "есть" if wf.has_oos_equity else "—" }}</td>
+          {# Значение резерва не читается и не показывается: раскрытие — ADM-5. #}
+          <td class="muted">{{ "отчёт есть, значение скрыто" if wf.has_holdout else "нет" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="line muted">walk-forward ещё не прогонялся</p>
+{% endif %}
+
+<p class="total">{{ total_line }}</p>
+{% endblock %}

@@ -335,7 +335,7 @@ def _describe_check(check: DatasetCheck) -> str:
 
     unit = ("бар", "бара", "баров") if check.is_candles else ("точка", "точки", "точек")
     parts = [head, plural(check.rows, *unit)]
-    defects = _defect_parts(check.report, unit)
+    defects = defect_parts(check.report, unit)
     parts.append("— " + (", ".join(defects) if defects else "чисто"))
     if check.note:
         parts.append(f"({check.note})")
@@ -344,10 +344,15 @@ def _describe_check(check: DatasetCheck) -> str:
     return " ".join(parts)
 
 
-def _defect_parts(
+def defect_parts(
     report: ValidationReport | SeriesValidationReport, unit: tuple[str, str, str]
 ) -> list[str]:
-    """Перечислить найденные дефекты — то, на что смотрят глазами."""
+    """Перечислить найденные дефекты — то, на что смотрят глазами.
+
+    Публичная, потому что те же формулировки показывает админка (ADM-3): дефект,
+    названный в CLI одним словом, а на странице другим, читался бы как два разных
+    дефекта.
+    """
     parts: list[str] = []
     if report.gaps:
         missing = (
@@ -402,6 +407,7 @@ __all__ = [
     "DatasetCheck",
     "PairValidation",
     "SeriesSpec",
+    "defect_parts",
     "describe_pair",
     "describe_total",
     "has_defects",

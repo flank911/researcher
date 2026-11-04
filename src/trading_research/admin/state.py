@@ -54,7 +54,7 @@ import polars as pl
 
 from trading_research.cli.fetch_market_data import PERIODIC_SERIES, SeriesKind
 from trading_research.cli.run_experiment import experiment_store_root
-from trading_research.cli.validate_data import SERIES_SPECS, report_path
+from trading_research.cli.validate_data import SERIES_SPECS, defect_parts, report_path
 from trading_research.cli.walk_forward import (
     HOLDOUT_REPORT_FILE,
     OOS_EQUITY_FILE,
@@ -253,6 +253,8 @@ class ValidationState:
     checked_at: datetime | None = None
     is_clean: bool | None = None
     rows: int = 0
+    defects: tuple[str, ...] = ()
+    """Найденные дефекты словами ``validate-data``, а не своими (ADM-3)."""
     error: str | None = None
     """Отчёт есть, но прочитать его не удалось — это состояние, а не исключение."""
 
@@ -309,6 +311,7 @@ def _validation_state(path: Path, *, dataset: str, symbol: str, timeframe: str) 
         checked_at=report.checked_at,
         is_clean=report.is_clean,
         rows=_report_rows(report),
+        defects=tuple(defect_parts(report, _unit(dataset))),
     )
 
 
@@ -316,6 +319,13 @@ def _report_rows(report: ValidationReport | SeriesValidationReport) -> int:
     if isinstance(report, ValidationReport):
         return report.total_bars
     return report.total_rows
+
+
+def _unit(dataset: str) -> tuple[str, str, str]:
+    """Чем меряется пропуск: свечи — барами, ряды — точками (как в DATA-8)."""
+    if dataset == CANDLES:
+        return ("бар", "бара", "баров")
+    return ("точка", "точки", "точек")
 
 
 # --- расписание -------------------------------------------------------------

@@ -195,7 +195,7 @@ def _data_alerts(state: PlatformState) -> list[Alert]:
             )
         elif dataset.reserve is not None and dataset.reserve < RESERVE_FLOOR:
             found.append(
-                Alert("данные", f"{name} — запас до потери истории {_span(dataset.reserve)}")
+                Alert("данные", f"{name} — запас до потери истории {fmt_span(dataset.reserve)}")
             )
         found.extend(_lag_alert(dataset, name))
     return found
@@ -215,10 +215,10 @@ def _lag_alert(dataset: DatasetState, name: str) -> list[Alert]:
         return []
     if periods is None:
         if lag > STALE_WITHOUT_PERIOD:
-            return [Alert("данные", f"{name} — нет новых точек {_span(lag)}")]
+            return [Alert("данные", f"{name} — нет новых точек {fmt_span(lag)}")]
         return []
     if periods > STALE_PERIODS:
-        return [Alert("данные", f"{name} — отстаёт на {_periods(periods)} ({_span(lag)})")]
+        return [Alert("данные", f"{name} — отстаёт на {fmt_periods(periods)} ({fmt_span(lag)})")]
     return []
 
 
@@ -240,7 +240,7 @@ def _schedule_alerts(state: PlatformState) -> list[Alert]:
     if silence is None:
         found.append(Alert("расписание", "в логе сбора нет ни одной итерации"))
     elif silence > SCHEDULE_SILENCE:
-        found.append(Alert("расписание", f"сбор молчит {_span(silence)}"))
+        found.append(Alert("расписание", f"сбор молчит {fmt_span(silence)}"))
     return found
 
 
@@ -311,19 +311,19 @@ def describe_dataset(dataset: DatasetState) -> str:
         return f"{head} данных нет"
 
     rows = _rows(dataset)
-    span = f"{_fmt(dataset.first_point)} … {_fmt(dataset.last_point)}"
+    span = f"{fmt_moment(dataset.first_point)} … {fmt_moment(dataset.last_point)}"
     parts = [f"{head} {span}, {rows}"]
     lag, periods = dataset.lag, dataset.lag_periods
     if lag is not None and lag <= timedelta(0):
         parts.append("актуален")
     elif periods is not None:
-        parts.append(f"отстаёт на {_periods(periods)}")
+        parts.append(f"отстаёт на {fmt_periods(periods)}")
     elif lag is not None:
-        parts.append(f"последняя точка {_span(lag)} назад")
+        parts.append(f"последняя точка {fmt_span(lag)} назад")
     if dataset.is_exhausted:
         parts.append("ИСТОРИЯ ПОТЕРЯНА")
     elif dataset.reserve is not None:
-        parts.append(f"запас {_span(dataset.reserve)}")
+        parts.append(f"запас {fmt_span(dataset.reserve)}")
     return ", ".join(parts)
 
 
@@ -335,10 +335,10 @@ def describe_schedule(state: PlatformState) -> str:
     if schedule.last_iteration_at is None:
         return f"{schedule.log_path}: ни одной итерации в логе"
 
-    parts = [f"последняя итерация {_fmt(schedule.last_iteration_at)}"]
+    parts = [f"последняя итерация {fmt_moment(schedule.last_iteration_at)}"]
     silence = schedule.silence
     if silence is not None and silence > timedelta(0):
-        parts.append(f"{_span(silence)} назад")
+        parts.append(f"{fmt_span(silence)} назад")
     if schedule.last_exit_status is None:
         parts.append("ещё не кончилась")
     else:
@@ -379,7 +379,7 @@ def describe_results(state: PlatformState) -> str:
             f"ненадёжных по числу сделок {results.unreliable} ({results.unreliable_share:.0%})"
         )
     if results.last_run_at is not None:
-        parts.append(f"последний {_fmt(results.last_run_at)}")
+        parts.append(f"последний {fmt_moment(results.last_run_at)}")
     return ", ".join(parts)
 
 
@@ -482,7 +482,8 @@ def _rows(dataset: DatasetState) -> str:
     return f"{int(count):,} {noun}".replace(",", " ")
 
 
-def _fmt(moment: datetime | None) -> str:
+def fmt_moment(moment: datetime | None) -> str:
+    """Момент времени в выводе; прочерк — «неизвестно»."""
     return moment.strftime("%Y-%m-%d %H:%M") if moment else "—"
 
 
@@ -494,16 +495,19 @@ def _seconds(span: timedelta | None) -> float | None:
     return span.total_seconds() if span is not None else None
 
 
-def _periods(count: int) -> str:
+def fmt_periods(count: int) -> str:
+    """Отставание в периодах ряда."""
     return plural(count, "период", "периода", "периодов")
 
 
-def _span(span: timedelta) -> str:
+def fmt_span(span: timedelta) -> str:
     """Длительность по-человечески: «3 суток 11 ч», «5 ч», «40 мин».
 
     Формат живёт здесь, а не в ``cli/text``: остальные команды печатают времена и
     бары, а длительности появились впервые — выносить общее стоит со второго
-    вызывающего, не с первого.
+    вызывающего, не с первого. Публичный, потому что то же самое показывает
+    админка (ADM-3): «3 суток 11 ч» в CLI и «3d 11h» на странице были бы двумя
+    разными ответами на один вопрос.
     """
     total = int(abs(span).total_seconds())
     days, rest = divmod(total, 86_400)
@@ -536,6 +540,9 @@ __all__ = [
     "describe_schedule",
     "describe_total",
     "describe_validation",
+    "fmt_moment",
+    "fmt_periods",
+    "fmt_span",
     "status_from_config",
     "status_payload",
     "summarize_validation",

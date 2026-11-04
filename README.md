@@ -67,10 +67,11 @@ src/trading_research/
   experiments/orchestrator, runner, grid/random search, time_splitters,
               cache, parallel, results_store, walk_forward, holdout
   analytics/  queries, stability, correlations, plots
-  admin/      состояние платформы как данные (read-model для админки)
+  admin/      состояние платформы как данные (read-model) и веб-страницы
+              только для чтения (templates/)
   cli/        main, fetch_data, fetch_market_data, update_data,
               update_market_data, validate_data, build_features,
-              run_experiment, walk_forward, status,
+              run_experiment, walk_forward, status, admin,
               analyze_results, analyze_regimes, export_results, plot_heatmap,
               text (общее форматирование вывода)
 notebooks/    исследовательские ноутбуки
@@ -217,6 +218,26 @@ trading-research status --config configs/experiments/ma_cross_multi_1h_4h.yaml
 `--strict` даёт код возврата 1, когда вмешательство требуется — так команду можно
 ставить перед прогоном; `--json` отдаёт то же состояние машинно.
 
+### То же состояние, но глазами
+
+Там, где `status` отвечает «всё ли живо», а углубиться не даёт, есть локальная
+админка (`ADM-3`) — две страницы, обе только для чтения:
+
+```bash
+pip install -e ".[admin]"      # веб-зависимости в отдельной экстре
+trading-research admin --config configs/experiments/ma_cross_multi_1h_4h.yaml
+# админка (только чтение) -> http://127.0.0.1:8787
+```
+
+«Обзор» повторяет блоки `status` и добавляет таблицы рядов и walk-forward,
+«Данные» показывает каждую пару по рядам: покрытие, отставание, запас retention,
+когда проверяли и вердикт. `/api/status` отдаёт то же, что `status --json`.
+
+Админка слушает только `127.0.0.1`, аутентификации у неё нет, и флага `--host`
+нет намеренно: доступ с другой машины — это SSH-туннель, то есть осознанное
+решение. Менять она не умеет ничего — ни одного `POST`; запуск шагов пайплайна —
+отдельный тикет (`ADM-6`).
+
 Отставание OI/LS на часы поводом не считается: их создаёт расписание раз в шесть
 часов, и на 1h они отстают по построению. Поводы у этих рядов другие — запас до
 потери истории меньше недели и тишина в логе дольше суток.
@@ -282,5 +303,6 @@ E5 (walk-forward) → E6 (market regimes) → E7 (первый реальный 
 Текущий фронт — два эпика. E9 «Расширение исследования»: `RES-1` закрыт (вторая
 стратегия как разделяющий эксперимент), остались `RES-2` сетка в сотни комбинаций и
 `RES-3` второй сквозной прогон. E10 «Админка»: закрыты `ADM-1` (состояние платформы
-как данные) и `ADM-2` (команда `status`), дальше веб-интерфейс только для чтения.
+как данные), `ADM-2` (команда `status`) и `ADM-3` (веб-страницы только для чтения),
+дальше страницы прогонов и walk-forward, а контроль — после них.
 Первые девять эпиков закрыты полностью — все 53 тикета.
