@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Прогон {{ detail.row.run_hash[:12] }}{% endblock %}
+
+{% set row = detail.row %}
+{% set prov = detail.provenance %}
+
+{% block content %}
+<h2>Прогон {{ row.run_hash[:12] }}</h2>
+<p class="line muted">
+  {{ row.symbol }} {{ row.timeframe }}, слайс <span class="mono">{{ row.slice_id }}</span>,
+  параметры <span class="mono">{{ row.params | params }}</span>.
+  <a href="/experiments/{{ name }}/runs?param_hash={{ row.param_hash }}">прогоны с теми же параметрами</a>
+</p>
+
+{% if row.failed %}
+  <p class="line alarm">Прогон завершился ошибкой: {{ row.error or "текст ошибки не записан" }}</p>
+{% elif row.error %}
+  <p class="line alarm">{{ row.error }}</p>
+{% endif %}
+
+<h2>Происхождение</h2>
+<dl class="facts">
+  <dt>run_hash</dt><dd>{{ prov.run_hash }}</dd>
+  <dt>пересчитан</dt>
+  <dd>
+    {%- if prov.identity_matches is none -%}
+      <span class="muted">не из чего: конфиг этого эксперимента в админке не открыт</span>
+    {%- elif prov.identity_matches -%}
+      <span class="ok">{{ prov.recomputed }} — сходится</span>
+    {%- else -%}
+      <span class="alarm">{{ prov.recomputed }} — не сходится: конфиг разошёлся с прогоном</span>
+    {%- endif -%}
+  </dd>
+  <dt>dataset_hash</dt>
+  <dd>
+    {{ prov.dataset_hash }}
+    {%- if data_check is none %}
+      — <a href="?verify=data">проверить, те ли сегодня данные</a>
+    {%- elif data_check.matches is none %}
+      <span class="muted">— проверить не вышло: {{ data_check.error }}</span>
+    {%- elif data_check.matches %}
+      <span class="ok">— сегодня в окне те же свечи ({{ data_check.rows }})</span>
+    {%- else %}
+      <span class="alarm">— сегодня в окне другие свечи: {{ data_check.today }}
+      ({{ data_check.rows }} строк). Прогон этой командой не повторится: данные под
+      числом изменились</span>
+    {%- endif %}
+  </dd>
+  <dt>git_commit</dt>
+  <dd>
+    {{ prov.git_commit or "—" }}
+    {%- if prov.code_changed %} <span class="warn">— код изменился, сейчас {{ prov.head_commit[:12] }}</span>{% endif %}
+  </dd>
+</dl>
+
+<h2>Как повторить</h2>
+<pre class="cmd">{% for line in prov.command %}{{ line }}
+{% endfor %}</pre>
+<p class="line muted">
+  <span class="mono">run_hash</span> складывается из стратегии, параметров, пары,
+  слайса, <span class="mono">dataset_hash</span>, модели исполнения и
+  <span class="mono">git_commit</span> (EXP-3).
+  {% if prov.identity_matches %}
+    Пересчёт сходится, значит показанного набора входов достаточно: это и есть
+    принцип №5 — проверенный, а не обещанный.
+  {% elif prov.identity_matches is none %}
+    Проверить происхождение не из чего: модель исполнения живёт в конфиге, а в
+    админке открыт конфиг другого эксперимента.
+  {% else %}
+    Пока пересчёт не сходится, воспроизведение этой командой даст другой ран, а не
+    этот же: конфиг изменился после прогона.
+  {% endif %}
+  {% if prov.code_changed %}
+    Без <span class="mono">git checkout</span> получится другой
+    <span class="mono">run_hash</span>: коммит входит в идентичность.
+  {% endif %}
+  {% if data_check is not none and data_check.matches is false %}
+    И этого всё равно мало: в окне конфига сегодня другие свечи, а
+    <span class="mono">dataset_hash</span> тоже входит в идентичность. Прогон
+    воспроизводим ровно до тех пор, пока под ним те же данные.
+  {% endif %}
+  Повторный запуск пропустит готовые раны (dedupe, EXP-3), поэтому команда
+  безопасна — она не перезапишет этот прогон.
+</p>
+
+<h2>Метрики</h2>
+{% if row.metrics is none %}
+  <p class="line muted">метрик нет: прогон записан, но результат в каталог не попал</p>
+{% else %}
+  <p class="line {{ 'alarm' if row.reliable is false else 'ok' }}">
+    {%- if row.reliable -%}
+      Надёжен: сделок {{ row.trades_count }}, не меньше
+      <span class="mono">min_trades={{ row.metrics.min_trades }}</span>.
+    {%- else -%}
+      Ненадёжен: сделок {{ row.trades_count }}, меньше
+      <span class="mono">min_trades={{ row.metrics.min_trades }}</span> (BT-7). Все
+      trade-зависимые метрики ниже статистически ничего не значат — на них нельзя
+      смотреть, какими бы они ни выглядели.
+    {%- endif -%}
+  </p>
+  <table>
+    <thead><tr><th>Метрика</th><th class="num">Значение</th></tr></thead>
+    <tbody>
+      {% for item in metrics %}
+        <tr>
+          <td class="mono">{{ item }}</td>
+          <td class="num mono">{{ row.value(item) | metric }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+<h2>Кривая капитала</h2>
+{% if detail.equity.is_empty %}
+  <p class="line muted">
+    equity не сохранён: за это отвечает <span class="mono">output.save_equity_curve</span>
+    в конфиге прогона
+  </p>
+{% else %}
+  <svg class="equity" viewBox="0 0 1000 100" preserveAspectRatio="none" role="img"
+       aria-label="кривая капитала прогона">
+    <path vector-effect="non-scaling-stroke" d="{% for fx, fy in detail.equity.shape() %}{{ "M" if loop.first else "L" }}{{ (fx * 1000) | round(1) }} {{ ((1 - fy) * 100) | round(1) }} {% endfor %}"/>
+  </svg>
+  <p class="line muted">
+    от {{ detail.equity.low | metric(0) }} до {{ detail.equity.high | metric(0) }};
+    показано {{ detail.equity.points | length }} точек из {{ detail.equity.total_points }}
+    (кривая прорежена — форму это не меняет, а разметку сокращает в разы)
+  </p>
+{% endif %}
+
+<h2>Сделки</h2>
+{% if detail.trades is none %}
+  <p class="line muted">
+    сделки не сохранены: за это отвечает <span class="mono">output.save_trades</span>
+  </p>
+{% elif not detail.trades.height %}
+  <p class="line muted">сделок нет: стратегия на этом окне не входила в рынок</p>
+{% else %}
+  <table>
+    <thead>
+      <tr>
+        {% for column in detail.trades.columns %}
+          <th class="{{ 'num' if column not in ('entry_time', 'exit_time', 'side', 'reason') }}">{{ column }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for trade in detail.trades.iter_rows(named=True) %}
+        <tr>
+          {% for column in detail.trades.columns %}
+            <td class="mono {{ 'num' if column not in ('entry_time', 'exit_time', 'side', 'reason') }}">
+              {%- set value = trade[column] -%}
+              {%- if value is none -%}—
+              {%- elif value is number -%}{{ value | metric }}
+              {%- else -%}{{ value }}{%- endif -%}
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="line muted">
+    всего сделок {{ detail.trades_total }}{% if detail.trades_hidden %}, показаны первые
+    {{ detail.trades | length }}{% endif %}
+  </p>
+{% endif %}
+{% endblock %}

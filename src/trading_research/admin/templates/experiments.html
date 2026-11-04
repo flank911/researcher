@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Эксперименты{% endblock %}
+
+{% block content %}
+<h2>Эксперименты</h2>
+{% if experiments %}
+  <table>
+    <thead>
+      <tr>
+        <th>Эксперимент</th>
+        <th>Стратегии</th>
+        <th class="num">Прогонов</th>
+        <th class="num">Пар</th>
+        <th class="num">Слайсов</th>
+        <th class="num">Наборов</th>
+        <th class="num">Ненадёжных</th>
+        <th>Последний прогон</th>
+        <th>Код</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for exp in experiments %}
+        <tr>
+          <td><a href="/experiments/{{ exp.name }}">{{ exp.name }}</a></td>
+          <td>{{ exp.strategies | join(", ") or "—" }}</td>
+          <td class="num mono">{{ exp.runs }}</td>
+          <td class="num mono">{{ exp.pairs | length }}</td>
+          <td class="num mono">{{ exp.slices }}</td>
+          <td class="num mono">{{ exp.param_sets }}</td>
+          <td class="num mono {{ 'alarm' if exp.unreliable else 'muted' }}">
+            {%- if exp.runs -%}
+              {{ exp.unreliable }} ({{ exp.unreliable_share | share }})
+            {%- else -%}
+              —
+            {%- endif -%}
+          </td>
+          <td class="mono">{{ exp.last_run_at | moment }}</td>
+          <td class="mono muted">
+            {%- if exp.git_commits | length == 1 -%}
+              {{ exp.git_commits[0][:7] }}
+            {%- elif exp.git_commits -%}
+              <span class="alarm">{{ exp.git_commits | length }} коммита</span>
+            {%- else -%}
+              —
+            {%- endif -%}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Что значит «ненадёжных»</h2>
+  <p class="line muted">
+    У прогона меньше <span class="mono">min_trades</span> сделок (BT-7), поэтому его
+    trade-зависимые метрики — <span class="mono">sharpe</span>,
+    <span class="mono">win_rate</span>, <span class="mono">profit_factor</span> —
+    статистически ничего не значат. Рейтинг AN-2 усредняет такие прогоны вместе с
+    остальными: фильтровать ли его — вопрос к AN-2, а не к админке. Здесь доля просто
+    видна, в том числе у каждой строки рейтинга.
+  </p>
+  <p class="line muted">
+    Несколько коммитов в одном эксперименте значат, что часть прогонов считалась
+    другим кодом: <span class="mono">git_commit</span> входит в
+    <span class="mono">run_hash</span>, поэтому такие результаты сравнимы не целиком.
+  </p>
+{% else %}
+  <p class="line muted">
+    каталогов результатов нет — прогонов ещё не было. Первый появится после
+    <span class="mono">trading-research run-experiment</span>.
+  </p>
+{% endif %}
+{% endblock %}

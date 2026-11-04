@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Прогоны — {{ experiment.name }}{% endblock %}
+
+{% block content %}
+<h2>Прогоны {{ experiment.name }}</h2>
+<p class="line muted">
+  {{ rows | length }} прогонов{% if filters %}: {{ filters | join(", ") }}{% endif %}.
+  <a href="/experiments/{{ experiment.name }}">к рейтингу</a>
+</p>
+
+{% if rows %}
+  <p class="line {{ 'alarm' if unreliable else 'muted' }}">
+    Ненадёжных среди них {{ unreliable }}{% if without_metrics %}, без метрик {{ without_metrics }}{% endif %}.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Пара</th>
+        <th>Слайс</th>
+        <th>Параметры</th>
+        <th class="num">{{ metric }}</th>
+        <th class="num">Сделок</th>
+        <th>Надёжность</th>
+        <th>Статус</th>
+        <th>Прогон</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td>{{ row.symbol }} {{ row.timeframe }}</td>
+          <td class="mono">{{ row.slice_id }}</td>
+          <td class="mono">{{ row.params | params }}</td>
+          <td class="num mono">{{ row.value(metric) | metric }}</td>
+          <td class="num mono">{{ row.trades_count if row.trades_count is not none else "—" }}</td>
+          <td>
+            {%- if row.reliable is none -%}
+              <span class="muted">метрик нет</span>
+            {%- elif row.reliable -%}
+              <span class="ok">надёжен</span>
+            {%- else -%}
+              <span class="alarm">мало сделок</span>
+            {%- endif -%}
+          </td>
+          <td class="{{ 'alarm' if row.failed else 'muted' }}">
+            {{ row.status }}{% if row.error %} — {{ row.error }}{% endif %}
+          </td>
+          <td class="mono">
+            <a href="/experiments/{{ experiment.name }}/runs/{{ row.run_hash }}">{{ row.run_hash[:12] }}</a>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="line muted">
+    «Мало сделок» — это <span class="mono">reliable=0</span>: сделок меньше
+    <span class="mono">min_trades</span>, поэтому trade-зависимые метрики прогона
+    статистически ничего не значат (BT-7). Прогон при этом посчитан до конца и из
+    рейтинга не исключён.
+  </p>
+{% else %}
+  <p class="line muted">под эти фильтры не попало ни одного прогона</p>
+{% endif %}
+{% endblock %}
