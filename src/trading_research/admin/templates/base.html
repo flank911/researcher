@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}trading-research{% endblock %}</title>
+  {# Ни одного внешнего адреса: админка обязана открываться без интернета (ADM-3). #}
+  <style>
+    :root {
+      --bg: #fbfbfa;
+      --fg: #1d1d1b;
+      --muted: #6b6b66;
+      --line: #e2e2dd;
+      --accent: #1f5f8b;
+      --alarm: #8b2f1f;
+      --ok: #2f6b3a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16171a;
+        --fg: #e8e8e4;
+        --muted: #9a9a93;
+        --line: #2c2e33;
+        --accent: #7fb4d8;
+        --alarm: #e08b78;
+        --ok: #8fc79a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      padding: 14px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      align-items: baseline;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    header nav { display: flex; gap: 14px; }
+    header nav a { color: var(--muted); text-decoration: none; }
+    header nav a.current { color: var(--accent); font-weight: 600; }
+    header .meta { margin-left: auto; color: var(--muted); font-size: 13px; }
+    main { padding: 20px 24px 48px; max-width: 1180px; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 10px; }
+    h2:first-child { margin-top: 0; }
+    table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; font-size: 13px; }
+    td.num { text-align: right; padding-right: 18px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .muted { color: var(--muted); }
+    .alarm { color: var(--alarm); }
+    .ok { color: var(--ok); }
+    .line { margin: 0 0 6px; }
+    ul.alerts { list-style: none; margin: 0; padding: 0; }
+    ul.alerts li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+    ul.alerts li span.block { color: var(--muted); margin-right: 8px; }
+    .total { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--line); font-weight: 600; }
+    .pair { margin: 0 0 6px; font-weight: 600; }
+    section.pair-block { margin-bottom: 22px; }
+    footer { padding: 0 24px 32px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>{{ state.experiment }}</h1>
+  <nav>
+    <a href="/" {% if page == "overview" %}class="current"{% endif %}>Обзор</a>
+    <a href="/data" {% if page == "data" %}class="current"{% endif %}>Данные</a>
+    <a href="/api/status">JSON</a>
+  </nav>
+  <span class="meta mono">состояние на {{ state.now | moment }}</span>
+</header>
+<main>
+  {% block content %}{% endblock %}
+</main>
+<footer>
+  Только чтение: запуск шагов пайплайна — отдельный тикет (ADM-6).
+  Конфиг: <span class="mono">{{ state.config_path }}</span>
+</footer>
+</body>
+</html>

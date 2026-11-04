@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Данные — {{ state.experiment }}{% endblock %}
+
+{% block content %}
+{% for pair, rows in pairs %}
+  <section class="pair-block">
+    <p class="pair">{{ pair[0] }} {{ pair[1] }}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Ряд</th>
+          <th>Покрытие</th>
+          <th class="num">Строк</th>
+          <th>Отставание</th>
+          <th>Запас</th>
+          <th>Проверено</th>
+          <th>Вердикт</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.dataset.dataset }}</td>
+            <td class="mono">
+              {%- if row.dataset.is_empty -%}
+                <span class="muted">данных нет</span>
+              {%- else -%}
+                {{ row.dataset.first_point | moment }} … {{ row.dataset.last_point | moment }}
+              {%- endif -%}
+            </td>
+            <td class="num mono">{{ "{:,}".format(row.dataset.rows).replace(",", " ") }}</td>
+            <td class="mono">
+              {%- if row.dataset.lag_periods is not none -%}
+                {{ row.dataset.lag_periods | periods }}
+              {%- elif row.dataset.lag -%}
+                {{ row.dataset.lag | span }}
+              {%- else -%}
+                <span class="muted">—</span>
+              {%- endif -%}
+            </td>
+            <td class="mono">
+              {%- if row.dataset.is_exhausted -%}
+                <span class="alarm">история потеряна</span>
+              {%- elif row.dataset.reserve -%}
+                {{ row.dataset.reserve | span }}
+              {%- else -%}
+                <span class="muted">—</span>
+              {%- endif -%}
+            </td>
+            <td class="mono">{{ row.checked_at }}</td>
+            <td class="{{ 'alarm' if row.is_defect else 'muted' }}">{{ row.verdict }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% else %}
+  <p class="line muted">в конфиге нет пар</p>
+{% endfor %}
+
+<h2>Что здесь поводом не считается</h2>
+<p class="line muted">
+  Отставание open interest и long/short ratio на часы — норма: их создаёт расписание
+  раз в шесть часов. Повод у этих рядов один — запас до потери истории, и он виден в
+  соседней колонке. Отсутствие funding/OI/LS — тоже не повод: они опциональны, без
+  них фичи режима остаются пустыми.
+</p>
+
+<p class="total">{{ report.alerts | length }} поводов вмешаться — см. <a href="/">Обзор</a></p>
+{% endblock %}

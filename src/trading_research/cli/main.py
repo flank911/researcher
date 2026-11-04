@@ -15,6 +15,12 @@ import polars as pl
 import typer
 
 from trading_research import __version__
+from trading_research.cli.admin import (
+    DEFAULT_PORT,
+    AdminStartupError,
+    describe_start,
+    serve,
+)
 from trading_research.cli.analyze_regimes import (
     analyze_regimes,
     export_regimes,
@@ -263,6 +269,34 @@ def status_cmd(
     # можно ставить перед прогоном — как validate-data (DATA-8).
     if strict and report.needs_attention:
         raise typer.Exit(code=1)
+
+
+@app.command("admin")
+def admin_cmd(
+    config: Path = typer.Option(..., exists=True, help="YAML-конфиг эксперимента."),
+    data_root: Path = typer.Option(Path("data/raw"), help="Корень Parquet-store."),
+    results_root: Path = typer.Option(Path("data/results"), help="Корень результатов."),
+    reports_root: Path = typer.Option(Path("data/reports"), help="Корень JSON-отчётов."),
+    log: Path = typer.Option(
+        Path("data/logs/update-market-data.log"), help="Лог регулярного сбора (OPS-1)."
+    ),
+    port: int = typer.Option(DEFAULT_PORT, help="Порт на 127.0.0.1."),
+) -> None:
+    """Поднять веб-админку (только чтение) на 127.0.0.1."""
+    typer.echo(describe_start(port))
+    try:
+        serve(
+            config,
+            data_root=data_root,
+            results_root=results_root,
+            reports_root=reports_root,
+            log_path=log if log.exists() else None,
+            port=port,
+        )
+    # Нет экстры или занят порт — это ответ пользователю, а не трейсбек.
+    except AdminStartupError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("build-features")
